@@ -1,0 +1,41 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Environment & secrets
+.env
+.env.*
+
+# Model cache
+.u2net/
+
+# Runtime outputs
+output/
+output_day2/
+outputs/
+uploads/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup & test files
+autofigure2_backup.py
+rmbg_api.py
+test_rmbg_api.py
+
+# Cloned repo (not part of this project)
+AutoFigure-Edit/
+
+# Claude Code config
+.claude/
+
+# IDE
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,21 @@
+# Web server
+fastapi>=0.110
+uvicorn>=0.24
+pydantic>=2.6
+python-multipart>=0.0.9
+
+# HTTP & image
+requests>=2.31
+Pillow>=10.0
+
+# Background removal (CPU, ONNX)
+rembg[cpu]>=2.0
+
+# LLM client
+openai>=1.0
+
+# SVG validation / rendering
+lxml>=4.9
+cairosvg>=2.7
+svglib>=1.5
+reportlab>=4.0
