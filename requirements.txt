@@ -14,8 +14,5 @@ rembg[cpu]>=2.0
 # LLM client
 openai>=1.0
 
-# SVG validation / rendering
+# SVG validation (lxml only; cairosvg/svglib removed to avoid native cairo dependency)
 lxml>=4.9
-cairosvg>=2.7
-svglib>=1.5
-reportlab>=4.0
