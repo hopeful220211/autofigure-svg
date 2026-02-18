@@ -493,18 +493,6 @@ def _ensure_port_free(port: int) -> None:
     _terminate_pids(pids)
 
 
-@app.options("/api/{rest_of_path:path}")
-async def preflight_handler(rest_of_path: str):
-    return JSONResponse(
-        content={},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        },
-    )
-
-
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="static")
 
 
