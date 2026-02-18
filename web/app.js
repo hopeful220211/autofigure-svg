@@ -1,4 +1,8 @@
 (() => {
+  // When served separately (e.g. Vercel), set API_BASE to the Railway backend URL.
+  // When served by server.py (same origin), leave empty to use relative paths.
+  const API_BASE = window.location.hostname === "localhost" ? "" : "https://autofigure-svg-production.up.railway.app";
+
   const page = document.body.dataset.page;
   if (page === "input") {
     initInputPage();
@@ -65,7 +69,7 @@
       };
 
       try {
-        const response = await fetch("/api/run", {
+        const response = await fetch(`${API_BASE}/api/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -99,7 +103,7 @@
     formData.append("file", file);
 
     try {
-      const response = await fetch("/api/upload", {
+      const response = await fetch(`${API_BASE}/api/upload`, {
         method: "POST",
         body: formData,
       });
@@ -116,7 +120,7 @@
       }
       statusEl.textContent = `Using uploaded reference: ${data.name}`;
       if (previewEl) {
-        previewEl.src = data.url || "";
+        previewEl.src = data.url ? `${API_BASE}${data.url}` : "";
         previewEl.classList.add("visible");
       }
     } catch (err) {
@@ -159,7 +163,7 @@
     let svgEditAvailable = false;
     let svgEditPath = null;
     try {
-      const configRes = await fetch("/api/config");
+      const configRes = await fetch(`${API_BASE}/api/config`);
       if (configRes.ok) {
         const config = await configRes.json();
         svgEditAvailable = Boolean(config.svgEditAvailable);
@@ -199,7 +203,7 @@
     let currentStep = 0;
 
     const artifacts = new Set();
-    const eventSource = new EventSource(`/api/events/${jobId}`);
+    const eventSource = new EventSource(`${API_BASE}/api/events/${jobId}`);
     let isFinished = false;
 
     eventSource.addEventListener("artifact", async (event) => {
@@ -249,7 +253,7 @@
     async function loadSvgAsset(url) {
       let svgText = "";
       try {
-        const response = await fetch(url);
+        const response = await fetch(`${API_BASE}${url}`);
         svgText = await response.text();
       } catch (err) {
         return;
@@ -266,10 +270,10 @@
 
         const loaded = tryLoadSvg(svgText);
         if (!loaded) {
-          iframe.src = `${svgEditPath}?url=${encodeURIComponent(url)}`;
+          iframe.src = `${svgEditPath}?url=${encodeURIComponent(`${API_BASE}${url}`)}`;
         }
       } else {
-        fallbackObject.data = url;
+        fallbackObject.data = `${API_BASE}${url}`;
       }
     }
 
@@ -305,12 +309,12 @@
   function addArtifactCard(container, data) {
     const card = document.createElement("a");
     card.className = "artifact-card";
-    card.href = data.url;
+    card.href = `${API_BASE}${data.url}`;
     card.target = "_blank";
     card.rel = "noreferrer";
 
     const img = document.createElement("img");
-    img.src = data.url;
+    img.src = `${API_BASE}${data.url}`;
     img.alt = data.name;
     img.loading = "lazy";
 
