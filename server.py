@@ -16,11 +16,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -60,6 +60,7 @@ class Job:
     log_lock: threading.Lock = field(default_factory=threading.Lock)
     seen: set[str] = field(default_factory=set)
     done: bool = False
+    last_stderr: str = ""
 
     def push(self, event: str, data: dict) -> None:
         self.queue.put({"event": event, "data": data})
@@ -100,6 +101,23 @@ app.add_middleware(
 JOBS: dict[str, Job] = {}
 
 
+@app.exception_handler(ValidationError)
+@app.exception_handler(422)
+async def validation_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=422,
+        content={"error": "请求参数有误，请检查输入内容。"},
+    )
+
+
+@app.exception_handler(500)
+async def internal_error_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"error": "服务器内部错误，请稍后重试。"},
+    )
+
+
 @app.get("/api/config")
 def get_config() -> JSONResponse:
     available, rel_path = _resolve_svg_edit_path()
@@ -108,97 +126,115 @@ def get_config() -> JSONResponse:
 
 @app.post("/api/run")
 def run_job(req: RunRequest) -> JSONResponse:
-    job_id = datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8]
-    output_dir = OUTPUTS_DIR / job_id
-    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        job_id = datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8]
+        output_dir = OUTPUTS_DIR / job_id
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = [
-        PYTHON_EXECUTABLE,
-        str(BASE_DIR / "autofigure2.py"),
-        "--method_text",
-        req.method_text,
-        "--output_dir",
-        str(output_dir),
-        "--provider",
-        req.provider,
-    ]
+        cmd = [
+            PYTHON_EXECUTABLE,
+            str(BASE_DIR / "autofigure2.py"),
+            "--method_text",
+            req.method_text,
+            "--output_dir",
+            str(output_dir),
+            "--provider",
+            req.provider,
+        ]
 
-    if req.api_key:
-        cmd += ["--api_key", req.api_key]
-    if req.base_url:
-        cmd += ["--base_url", req.base_url]
-    if req.image_model:
-        cmd += ["--image_model", req.image_model]
-    if req.svg_model:
-        cmd += ["--svg_model", req.svg_model]
+        if req.api_key:
+            cmd += ["--api_key", req.api_key]
+        if req.base_url:
+            cmd += ["--base_url", req.base_url]
+        if req.image_model:
+            cmd += ["--image_model", req.image_model]
+        if req.svg_model:
+            cmd += ["--svg_model", req.svg_model]
 
-    sam_prompt = req.sam_prompt or DEFAULT_SAM_PROMPT
-    placeholder_mode = req.placeholder_mode or DEFAULT_PLACEHOLDER_MODE
-    merge_threshold = (
-        req.merge_threshold if req.merge_threshold is not None else DEFAULT_MERGE_THRESHOLD
-    )
-
-    cmd += ["--sam_prompt", sam_prompt]
-    cmd += ["--placeholder_mode", placeholder_mode]
-    cmd += ["--merge_threshold", str(merge_threshold)]
-    if req.sam_backend:
-        cmd += ["--sam_backend", req.sam_backend]
-    if req.sam_api_key:
-        cmd += ["--sam_api_key", req.sam_api_key]
-    if req.sam_max_masks is not None:
-        cmd += ["--sam_max_masks", str(req.sam_max_masks)]
-    if req.optimize_iterations is not None:
-        cmd += ["--optimize_iterations", str(req.optimize_iterations)]
-
-    reference_path = req.reference_image_path
-    if reference_path:
-        reference_path = (
-            str((BASE_DIR / reference_path).resolve())
-            if not Path(reference_path).is_absolute()
-            else reference_path
+        sam_prompt = req.sam_prompt or DEFAULT_SAM_PROMPT
+        placeholder_mode = req.placeholder_mode or DEFAULT_PLACEHOLDER_MODE
+        merge_threshold = (
+            req.merge_threshold if req.merge_threshold is not None else DEFAULT_MERGE_THRESHOLD
         )
-        cmd += ["--reference_image_path", reference_path]
 
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
+        cmd += ["--sam_prompt", sam_prompt]
+        cmd += ["--placeholder_mode", placeholder_mode]
+        cmd += ["--merge_threshold", str(merge_threshold)]
+        if req.sam_backend:
+            cmd += ["--sam_backend", req.sam_backend]
+        if req.sam_api_key:
+            cmd += ["--sam_api_key", req.sam_api_key]
+        if req.sam_max_masks is not None:
+            cmd += ["--sam_max_masks", str(req.sam_max_masks)]
+        if req.optimize_iterations is not None:
+            cmd += ["--optimize_iterations", str(req.optimize_iterations)]
 
-    log_path = output_dir / "run.log"
-    log_path.write_text(
-        f"[meta] python={PYTHON_EXECUTABLE}\n[meta] cmd={' '.join(cmd)}\n",
-        encoding="utf-8",
-    )
+        reference_path = req.reference_image_path
+        if reference_path:
+            reference_path = (
+                str((BASE_DIR / reference_path).resolve())
+                if not Path(reference_path).is_absolute()
+                else reference_path
+            )
+            cmd += ["--reference_image_path", reference_path]
 
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-        env=env,
-        cwd=str(BASE_DIR),
-    )
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
 
-    job = Job(
-        job_id=job_id,
-        output_dir=output_dir,
-        process=process,
-        queue=queue.Queue(),
-        log_path=log_path,
-    )
-    JOBS[job_id] = job
+        log_path = output_dir / "run.log"
+        # 隐藏 API 密钥，避免泄露到日志
+        safe_cmd = []
+        skip_next = False
+        for i, part in enumerate(cmd):
+            if skip_next:
+                safe_cmd.append("***")
+                skip_next = False
+            elif part in ("--api_key", "--sam_api_key"):
+                safe_cmd.append(part)
+                skip_next = True
+            else:
+                safe_cmd.append(part)
+        log_path.write_text(
+            f"[meta] python={PYTHON_EXECUTABLE}\n[meta] cmd={' '.join(safe_cmd)}\n",
+            encoding="utf-8",
+        )
 
-    monitor_thread = threading.Thread(target=_monitor_job, args=(job,), daemon=True)
-    monitor_thread.start()
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=env,
+            cwd=str(BASE_DIR),
+        )
 
-    return JSONResponse({"job_id": job_id})
+        job = Job(
+            job_id=job_id,
+            output_dir=output_dir,
+            process=process,
+            queue=queue.Queue(),
+            log_path=log_path,
+        )
+        JOBS[job_id] = job
+
+        monitor_thread = threading.Thread(target=_monitor_job, args=(job,), daemon=True)
+        monitor_thread.start()
+
+        return JSONResponse({"job_id": job_id})
+    except Exception:
+        return JSONResponse(
+            status_code=500,
+            content={"error": "启动任务失败，请检查服务器配置或稍后重试。"},
+        )
 
 
 @app.post("/api/upload")
 async def upload_reference(file: UploadFile = File(...)) -> JSONResponse:
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
+        raise HTTPException(status_code=400, detail="未提供文件")
     if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
+        raise HTTPException(status_code=400, detail="仅支持图片文件")
 
     ext = Path(file.filename).suffix.lower()
     if ext not in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}:
@@ -206,7 +242,7 @@ async def upload_reference(file: UploadFile = File(...)) -> JSONResponse:
 
     data = await file.read()
     if len(data) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large")
+        raise HTTPException(status_code=400, detail="文件过大（上限 20MB）")
 
     name = f"{uuid.uuid4().hex}{ext}"
     out_path = UPLOADS_DIR / name
@@ -294,7 +330,10 @@ def _monitor_job(job: Job) -> None:
         time.sleep(0.5)
 
     _scan_artifacts(job)
-    job.push("status", {"state": "finished", "code": job.process.returncode})
+    finished_data: dict = {"state": "finished", "code": job.process.returncode}
+    if job.process.returncode and job.process.returncode != 0 and job.last_stderr:
+        finished_data["error"] = job.last_stderr
+    job.push("status", finished_data)
     job.push(
         "artifact",
         {
@@ -316,6 +355,8 @@ def _pipe_output(job: Job, pipe, stream_name: str) -> None:
         if text:
             job.write_log(stream_name, text)
             job.push("log", {"stream": stream_name, "line": text})
+            if stream_name == "stderr":
+                job.last_stderr = text
     pipe.close()
 
 

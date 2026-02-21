@@ -11,6 +11,19 @@
     return document.getElementById(id);
   }
 
+  function parseErrorMessage(text) {
+    try {
+      const obj = JSON.parse(text);
+      if (obj.error) return obj.error;
+      if (obj.detail) {
+        if (typeof obj.detail === "string") return obj.detail;
+        return "请求参数有误，请检查输入内容。";
+      }
+    } catch (_) {}
+    if (text.length > 200) return "请求失败，请检查输入或稍后重试。";
+    return text;
+  }
+
   function initInputPage() {
     const confirmBtn = $("confirmBtn");
     const errorMsg = $("errorMsg");
@@ -74,7 +87,7 @@
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(text || "请求失败");
+          throw new Error(parseErrorMessage(text || "请求失败"));
         }
 
         const data = await response.json();
@@ -107,7 +120,7 @@
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || "上传失败");
+        throw new Error(parseErrorMessage(text || "上传失败"));
       }
 
       const data = await response.json();
@@ -227,7 +240,16 @@
       } else if (data.state === "finished") {
         isFinished = true;
         if (typeof data.code === "number" && data.code !== 0) {
-          statusText.textContent = `失败（错误码 ${data.code}）`;
+          const errorDetail = data.error || "";
+          statusText.innerHTML = `<span style="color:#e74c3c">生成失败</span>`;
+          if (errorDetail) {
+            const errorEl = document.createElement("div");
+            errorEl.className = "canvas-error";
+            errorEl.textContent = errorDetail;
+            statusText.parentElement.appendChild(errorEl);
+          }
+          // 失败时自动展开日志面板
+          logPanel.classList.add("open");
         } else {
           statusText.textContent = "已完成";
         }

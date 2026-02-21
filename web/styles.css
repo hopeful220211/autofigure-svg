@@ -252,6 +252,17 @@ select {
   font-size: 13px;
 }
 
+.canvas-error {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: rgba(231, 76, 60, 0.08);
+  border: 1px solid rgba(231, 76, 60, 0.2);
+  border-radius: 8px;
+  color: #c0392b;
+  font-size: 13px;
+  word-break: break-word;
+}
+
 .canvas-stage {
   height: calc(100vh - 140px);
 }
