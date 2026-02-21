@@ -328,11 +328,12 @@ def _call_bianxie_image_generation(
 
 def _get_openrouter_headers(api_key: str) -> dict:
     """获取 OpenRouter 请求头"""
+    referer = os.environ.get('OPENROUTER_REFERER', 'https://autofigure.app')
     return {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {api_key}',
-        'HTTP-Referer': 'https://localhost',
-        'X-Title': 'MethodToSVG'
+        'HTTP-Referer': referer,
+        'X-Title': 'AutoFigure'
     }
 
 
@@ -655,7 +656,7 @@ def get_label_font(box_width: int, box_height: int) -> ImageFont.FreeTypeFont:
     # 回退到默认字体
     try:
         return ImageFont.load_default()
-    except:
+    except Exception:
         return None
 
 
@@ -1033,7 +1034,7 @@ def segment_with_sam3(
     output_dir: str,
     text_prompts: str = "icon",
     min_score: float = 0.5,
-    merge_threshold: float = 0.9,
+    merge_threshold: float = 0.01,
     sam_backend: Literal["local", "fal", "roboflow", "api"] = "local",
     sam_api_key: Optional[str] = None,
     sam_max_masks: int = 32,
@@ -1948,28 +1949,55 @@ def validate_base64_images(svg_code: str, expected_count: int) -> tuple[bool, st
 
 
 def svg_to_png(svg_path: str, output_path: str, scale: float = 1.0) -> Optional[str]:
-    """将 SVG 转换为 PNG"""
+    """将 SVG 转换为 PNG，依次尝试 cairosvg、svglib、rsvg-convert、inkscape"""
+    # 方法 1: cairosvg
     try:
         import cairosvg
         cairosvg.svg2png(url=svg_path, write_to=output_path, scale=scale)
         return output_path
     except ImportError:
-        print("  警告: cairosvg 未安装，尝试使用其他方法")
-        try:
-            from svglib.svglib import svg2rlg
-            from reportlab.graphics import renderPM
-            drawing = svg2rlg(svg_path)
-            renderPM.drawToFile(drawing, output_path, fmt="PNG")
-            return output_path
-        except ImportError:
-            print("  警告: svglib 也未安装，无法转换 SVG 到 PNG")
-            return None
-        except Exception as e:
-            print(f"  警告: svglib 转换失败: {e}")
-            return None
+        pass
     except Exception as e:
         print(f"  警告: cairosvg 转换失败: {e}")
-        return None
+
+    # 方法 2: svglib + reportlab
+    try:
+        from svglib.svglib import svg2rlg
+        from reportlab.graphics import renderPM
+        drawing = svg2rlg(svg_path)
+        if drawing:
+            renderPM.drawToFile(drawing, output_path, fmt="PNG")
+            return output_path
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"  警告: svglib 转换失败: {e}")
+
+    # 方法 3: rsvg-convert (系统命令)
+    import shutil
+    if shutil.which("rsvg-convert"):
+        try:
+            subprocess.run(
+                ["rsvg-convert", "-z", str(scale), "-o", output_path, svg_path],
+                check=True, capture_output=True, timeout=30,
+            )
+            return output_path
+        except Exception as e:
+            print(f"  警告: rsvg-convert 转换失败: {e}")
+
+    # 方法 4: inkscape (系统命令)
+    if shutil.which("inkscape"):
+        try:
+            subprocess.run(
+                ["inkscape", svg_path, "--export-type=png", f"--export-filename={output_path}"],
+                check=True, capture_output=True, timeout=30,
+            )
+            return output_path
+        except Exception as e:
+            print(f"  警告: inkscape 转换失败: {e}")
+
+    print("  警告: 无可用的 SVG 转 PNG 工具（cairosvg/svglib/rsvg-convert/inkscape 均不可用）")
+    return None
 
 
 def optimize_svg_with_llm(
@@ -2139,7 +2167,7 @@ Please carefully compare and check the following **TWO MAJOR ASPECTS with EIGHT 
         try:
             current_svg_path.unlink(missing_ok=True)
             current_png_path.unlink(missing_ok=True)
-        except:
+        except Exception:
             pass
 
     output_path = Path(output_path)
@@ -2177,7 +2205,7 @@ def method_to_svg(
     stop_after: int = 5,
     placeholder_mode: PlaceholderMode = "label",
     optimize_iterations: int = 2,
-    merge_threshold: float = 0.9,
+    merge_threshold: float = 0.01,
 ) -> dict:
     """
     完整流程：Paper Method → SVG with Icons
@@ -2522,8 +2550,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--merge_threshold",
         type=float,
-        default=0.001,
-        help="Box合并阈值，重叠比例超过此值则合并（0表示不合并，默认: 0.9）"
+        default=0.01,
+        help="Box合并阈值，重叠比例超过此值则合并（0表示不合并，默认: 0.01）"
     )
 
     args = parser.parse_args()

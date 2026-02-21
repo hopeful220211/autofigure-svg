@@ -40,6 +40,8 @@ DEFAULT_SAM_BACKEND = "roboflow"
 DEFAULT_SAM_PROMPT = "icon,person,animal,robot"
 DEFAULT_PLACEHOLDER_MODE = "label"
 DEFAULT_MERGE_THRESHOLD = 0.01
+JOB_TIMEOUT_SECONDS = 600  # 10 分钟超时
+JOB_RETENTION_SECONDS = 3600  # 已完成任务保留 1 小时
 
 SVG_EDIT_CANDIDATES = [
     ("vendor/svg-edit/editor/index.html", WEB_DIR / "vendor" / "svg-edit" / "editor" / "index.html"),
@@ -66,6 +68,8 @@ class Job:
     seen: set[str] = field(default_factory=set)
     done: bool = False
     last_stderr: str = ""
+    started_at: float = field(default_factory=time.time)
+    finished_at: float = 0.0
 
     def push(self, event: str, data: dict) -> None:
         self.queue.put({"event": event, "data": data})
@@ -319,8 +323,20 @@ def _monitor_job(job: Job) -> None:
     stderr_thread.start()
 
     idle_cycles = 0
+    timed_out = False
     while True:
         _scan_artifacts(job)
+
+        # 超时检查
+        elapsed = time.time() - job.started_at
+        if elapsed > JOB_TIMEOUT_SECONDS and job.process.poll() is None:
+            job.process.terminate()
+            try:
+                job.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                job.process.kill()
+            timed_out = True
+            break
 
         if job.process.poll() is not None:
             idle_cycles += 1
@@ -332,9 +348,14 @@ def _monitor_job(job: Job) -> None:
         time.sleep(0.5)
 
     _scan_artifacts(job)
-    finished_data: dict = {"state": "finished", "code": job.process.returncode}
-    if job.process.returncode and job.process.returncode != 0 and job.last_stderr:
-        finished_data["error"] = job.last_stderr
+
+    if timed_out:
+        finished_data: dict = {"state": "finished", "code": -1, "error": f"任务超时（超过 {JOB_TIMEOUT_SECONDS // 60} 分钟），已自动终止。"}
+    else:
+        finished_data = {"state": "finished", "code": job.process.returncode}
+        if job.process.returncode and job.process.returncode != 0 and job.last_stderr:
+            finished_data["error"] = job.last_stderr
+
     job.push("status", finished_data)
     job.push(
         "artifact",
@@ -345,8 +366,23 @@ def _monitor_job(job: Job) -> None:
             "url": f"/api/artifacts/{job.job_id}/{job.log_path.name}",
         },
     )
+    job.finished_at = time.time()
     job.done = True
     job.push("close", {})
+
+    # 清理过期任务，释放内存
+    _cleanup_old_jobs()
+
+
+def _cleanup_old_jobs() -> None:
+    """清理已完成且超过保留时间的任务，释放内存"""
+    now = time.time()
+    expired = [
+        jid for jid, j in JOBS.items()
+        if j.done and j.finished_at > 0 and (now - j.finished_at) > JOB_RETENTION_SECONDS
+    ]
+    for jid in expired:
+        JOBS.pop(jid, None)
 
 
 def _pipe_output(job: Job, pipe, stream_name: str) -> None:
