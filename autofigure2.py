@@ -366,7 +366,7 @@ def _call_openrouter_text(
         'stream': False
     }
 
-    response = requests.post(api_url, headers=headers, json=payload, timeout=300)
+    response = requests.post(api_url, headers=headers, data=json.dumps(payload, ensure_ascii=True).encode('utf-8'), timeout=300)
 
     if response.status_code != 200:
         raise Exception(f'OpenRouter API 错误: {response.status_code} - {response.text[:500]}')
@@ -419,7 +419,7 @@ def _call_openrouter_multimodal(
         'stream': False
     }
 
-    response = requests.post(api_url, headers=headers, json=payload, timeout=300)
+    response = requests.post(api_url, headers=headers, data=json.dumps(payload, ensure_ascii=True).encode('utf-8'), timeout=300)
 
     if response.status_code != 200:
         raise Exception(f'OpenRouter API 错误: {response.status_code} - {response.text[:500]}')
@@ -469,7 +469,7 @@ def _call_openrouter_image_generation(
         'stream': False
     }
 
-    response = requests.post(api_url, headers=headers, json=payload, timeout=300)
+    response = requests.post(api_url, headers=headers, data=json.dumps(payload, ensure_ascii=True).encode('utf-8'), timeout=300)
 
     if response.status_code != 200:
         raise Exception(f'OpenRouter API 错误: {response.status_code} - {response.text[:500]}')
