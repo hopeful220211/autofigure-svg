@@ -11,16 +11,32 @@
     <div class="canvas-page">
       <header class="topbar">
         <div>
-          <div class="brand">AutoFigure 画布</div>
+          <div class="brand">
+            <a href="/" class="back-link" title="返回首页">&larr;</a>
+            AutoFigure 画布
+          </div>
           <div class="subtitle">
             状态：<span id="statusText">等待中</span>
           </div>
         </div>
         <div class="topbar-actions">
+          <button class="ghost danger-ghost" id="cancelBtn" style="display:none">取消任务</button>
           <button class="ghost" id="logToggle">日志</button>
           <div class="job-pill">任务 <span id="jobId"></span></div>
         </div>
       </header>
+
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+        <div class="progress-steps" id="progressSteps">
+          <span class="progress-step active" data-step="0">等待</span>
+          <span class="progress-step" data-step="1">生成图片</span>
+          <span class="progress-step" data-step="2">SAM3 分割</span>
+          <span class="progress-step" data-step="3">提取图标</span>
+          <span class="progress-step" data-step="4">生成模板</span>
+          <span class="progress-step" data-step="5">最终合成</span>
+        </div>
+      </div>
 
       <main class="canvas-stage">
         <div class="canvas-shell">
@@ -35,6 +51,11 @@
               请将 SVG-Edit 构建文件放入 <code>web/vendor/svg-edit/</code>（需包含 editor/index.html）以启用编辑功能。
             </div>
             <object id="fallbackObject" type="image/svg+xml" class="fallback-object"></object>
+          </div>
+          <div id="previewOverlay" class="preview-overlay">
+            <div class="preview-spinner"></div>
+            <div class="preview-step-label" id="previewStepLabel">正在生成图片...</div>
+            <img id="previewImage" class="preview-image" alt="中间产物预览" />
           </div>
         </div>
       </main>

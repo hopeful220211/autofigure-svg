@@ -263,8 +263,130 @@ select {
   word-break: break-word;
 }
 
+/* 返回按钮 */
+.back-link {
+  text-decoration: none;
+  color: var(--accent-strong);
+  margin-right: 8px;
+  font-size: 24px;
+  vertical-align: middle;
+}
+
+.back-link:hover {
+  color: var(--accent);
+}
+
+/* 取消按钮 */
+.danger-ghost {
+  border-color: rgba(196, 69, 54, 0.3);
+  color: #c44536;
+}
+
+.danger-ghost:hover {
+  border-color: #c44536;
+  background: rgba(196, 69, 54, 0.06);
+}
+
+/* 进度条 */
+.progress-bar {
+  position: relative;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  height: 36px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), rgba(22, 155, 155, 0.6));
+  border-radius: 12px;
+  width: 0%;
+  transition: width 0.6s ease;
+}
+
+.progress-steps {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 100%;
+  padding: 0 12px;
+  z-index: 1;
+}
+
+.progress-step {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  transition: color 0.3s ease;
+}
+
+.progress-step.active {
+  color: var(--ink);
+}
+
+.progress-step.done {
+  color: #fff;
+}
+
+/* 预览覆盖层 */
+.preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: linear-gradient(135deg, rgba(22, 155, 155, 0.04), rgba(240, 138, 60, 0.04));
+  z-index: 2;
+}
+
+.preview-overlay.hidden {
+  display: none;
+}
+
+.preview-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.preview-step-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.preview-image {
+  max-width: 60%;
+  max-height: 50%;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  display: none;
+  object-fit: contain;
+  background: #fff;
+}
+
+.preview-image.visible {
+  display: block;
+}
+
 .canvas-stage {
-  height: calc(100vh - 140px);
+  height: calc(100vh - 180px);
 }
 
 .canvas-shell {

@@ -254,6 +254,20 @@ async def upload_reference(file: UploadFile = File(...)) -> JSONResponse:
     )
 
 
+@app.post("/api/cancel/{job_id}")
+def cancel_job(job_id: str) -> JSONResponse:
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if job.done:
+        return JSONResponse({"status": "already_finished"})
+    try:
+        job.process.terminate()
+    except Exception:
+        pass
+    return JSONResponse({"status": "cancelled"})
+
+
 @app.get("/api/events/{job_id}")
 def stream_events(job_id: str) -> StreamingResponse:
     job = JOBS.get(job_id)
@@ -366,6 +380,7 @@ def _scan_artifacts(job: Job) -> None:
         output_dir / "figure.png",
         output_dir / "samed.png",
         output_dir / "template.svg",
+        output_dir / "optimized_template.svg",
         output_dir / "final.svg",
     ]
 
@@ -404,6 +419,8 @@ def _classify_artifact(rel_path: str) -> str:
         return "icon_raw"
     if rel_path == "template.svg":
         return "template_svg"
+    if rel_path == "optimized_template.svg":
+        return "optimized_svg"
     if rel_path == "final.svg":
         return "final_svg"
     return "artifact"
