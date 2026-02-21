@@ -48,12 +48,12 @@
       errorMsg.textContent = "";
       const methodText = $("methodText").value.trim();
       if (!methodText) {
-        errorMsg.textContent = "Please provide method text.";
+        errorMsg.textContent = "请输入论文方法描述文本。";
         return;
       }
 
       confirmBtn.disabled = true;
-      confirmBtn.textContent = "Starting...";
+      confirmBtn.textContent = "正在启动...";
 
       const payload = {
         method_text: methodText,
@@ -74,27 +74,27 @@
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(text || "Request failed");
+          throw new Error(text || "请求失败");
         }
 
         const data = await response.json();
         window.location.href = `/canvas.html?job=${encodeURIComponent(data.job_id)}`;
       } catch (err) {
-        errorMsg.textContent = err.message || "Failed to start job";
+        errorMsg.textContent = err.message || "启动任务失败";
         confirmBtn.disabled = false;
-        confirmBtn.textContent = "Confirm -> Canvas";
+        confirmBtn.textContent = "开始生成";
       }
     });
   }
 
   async function uploadReference(file, confirmBtn, previewEl, statusEl) {
     if (!file.type.startsWith("image/")) {
-      statusEl.textContent = "Only image files are supported.";
+      statusEl.textContent = "仅支持图片文件。";
       return;
     }
 
     confirmBtn.disabled = true;
-    statusEl.textContent = "Uploading reference...";
+    statusEl.textContent = "正在上传参考图...";
 
     const formData = new FormData();
     formData.append("file", file);
@@ -107,7 +107,7 @@
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || "Upload failed");
+        throw new Error(text || "上传失败");
       }
 
       const data = await response.json();
@@ -115,13 +115,13 @@
       if (referenceInput) {
         referenceInput.value = data.path;
       }
-      statusEl.textContent = `Using uploaded reference: ${data.name}`;
+      statusEl.textContent = `已使用上传的参考图：${data.name}`;
       if (previewEl) {
         previewEl.src = data.url || "";
         previewEl.classList.add("visible");
       }
     } catch (err) {
-      statusEl.textContent = err.message || "Upload failed";
+      statusEl.textContent = err.message || "上传失败";
     } finally {
       confirmBtn.disabled = false;
     }
@@ -143,7 +143,7 @@
     const fallbackObject = $("fallbackObject");
 
     if (!jobId) {
-      statusText.textContent = "Missing job id";
+      statusText.textContent = "缺少任务 ID";
       return;
     }
 
@@ -189,12 +189,12 @@
     });
 
     const stepMap = {
-      figure: { step: 1, label: "Figure generated" },
-      samed: { step: 2, label: "SAM3 segmentation" },
-      icon_raw: { step: 3, label: "Icons extracted" },
-      icon_nobg: { step: 3, label: "Icons refined" },
-      template_svg: { step: 4, label: "Template SVG ready" },
-      final_svg: { step: 5, label: "Final SVG ready" },
+      figure: { step: 1, label: "图片已生成" },
+      samed: { step: 2, label: "SAM3 分割完成" },
+      icon_raw: { step: 3, label: "图标已提取" },
+      icon_nobg: { step: 3, label: "图标已去背景" },
+      template_svg: { step: 4, label: "模板 SVG 已就绪" },
+      final_svg: { step: 5, label: "最终 SVG 已就绪" },
     };
 
     let currentStep = 0;
@@ -216,20 +216,20 @@
 
       if (stepMap[data.kind] && stepMap[data.kind].step > currentStep) {
         currentStep = stepMap[data.kind].step;
-        statusText.textContent = `Step ${currentStep}/5 - ${stepMap[data.kind].label}`;
+        statusText.textContent = `第 ${currentStep}/5 步 - ${stepMap[data.kind].label}`;
       }
     });
 
     eventSource.addEventListener("status", (event) => {
       const data = JSON.parse(event.data);
       if (data.state === "started") {
-        statusText.textContent = "Running";
+        statusText.textContent = "运行中";
       } else if (data.state === "finished") {
         isFinished = true;
         if (typeof data.code === "number" && data.code !== 0) {
-          statusText.textContent = `Failed (code ${data.code})`;
+          statusText.textContent = `失败（错误码 ${data.code}）`;
         } else {
-          statusText.textContent = "Done";
+          statusText.textContent = "已完成";
         }
       }
     });
@@ -244,7 +244,7 @@
         eventSource.close();
         return;
       }
-      statusText.textContent = "Disconnected";
+      statusText.textContent = "连接已断开";
     };
 
     async function loadSvgAsset(url) {
@@ -336,19 +336,19 @@
   function formatKind(kind) {
     switch (kind) {
       case "figure":
-        return "figure";
+        return "生成图";
       case "samed":
-        return "samed";
+        return "分割图";
       case "icon_raw":
-        return "icon raw";
+        return "原始图标";
       case "icon_nobg":
-        return "icon no-bg";
+        return "去背景图标";
       case "template_svg":
-        return "template";
+        return "模板";
       case "final_svg":
-        return "final";
+        return "最终版";
       default:
-        return "artifact";
+        return "产物";
     }
   }
 })();

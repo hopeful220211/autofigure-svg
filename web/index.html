@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Autofigure2 Demo</title>
+    <title>AutoFigure - 论文方法图生成</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -11,25 +11,25 @@
     <div class="page">
       <header class="topbar">
         <div>
-          <div class="brand">Autofigure2 Demo</div>
-          <div class="subtitle">Generate SVG templates and preview every step.</div>
+          <div class="brand">AutoFigure</div>
+          <div class="subtitle">从论文方法描述自动生成 SVG 流程图</div>
         </div>
       </header>
 
       <main class="input-layout">
         <section class="card">
-          <label class="field-label" for="methodText">Method Text</label>
+          <label class="field-label" for="methodText">方法描述</label>
           <textarea
             id="methodText"
             class="textarea"
-            placeholder="Paste your paper method text here..."
+            placeholder="在此粘贴论文的 Method 部分文本..."
           ></textarea>
-          <div class="hint">Tip: concise, structured method text yields cleaner templates.</div>
+          <div class="hint">提示：简洁、结构化的方法描述能生成更清晰的模板。</div>
         </section>
 
         <section class="card">
           <div class="field-group">
-            <label class="field-label" for="provider">Provider</label>
+            <label class="field-label" for="provider">服务商</label>
             <select id="provider" class="input">
               <option value="bianxie" selected>Bianxie</option>
               <option value="openrouter">OpenRouter</option>
@@ -37,25 +37,25 @@
           </div>
 
           <div class="field-group">
-            <label class="field-label" for="apiKey">API Key</label>
+            <label class="field-label" for="apiKey">API 密钥</label>
             <input id="apiKey" type="password" class="input" placeholder="sk-..." />
           </div>
 
           <div class="field-group">
-            <label class="field-label" for="optimizeIterations">Optimize</label>
+            <label class="field-label" for="optimizeIterations">优化迭代次数</label>
             <input id="optimizeIterations" class="input" type="number" min="0" value="0" />
           </div>
 
           <details class="advanced">
-            <summary>Advanced</summary>
+            <summary>高级选项</summary>
             <div class="field-group">
-              <label class="field-label" for="referenceImage">Reference Image</label>
+              <label class="field-label" for="referenceImage">参考图片</label>
               <div class="upload-zone" id="uploadZone">
                 <input id="referenceFile" class="file-input" type="file" accept="image/*" />
-                <div class="upload-text">Drop image here or click to upload</div>
+                <div class="upload-text">拖拽图片到此处，或点击上传</div>
               </div>
               <div class="upload-meta">
-                <img id="referencePreview" class="upload-preview" alt="Reference preview" />
+                <img id="referencePreview" class="upload-preview" alt="参考图预览" />
                 <div id="referenceStatus" class="hint"></div>
               </div>
               <input
@@ -63,33 +63,33 @@
                 class="input"
                 value="refer_figure/2.png"
               />
-              <div class="hint">Upload overrides the path above.</div>
+              <div class="hint">上传文件会覆盖上方路径。</div>
             </div>
 
             <div class="field-group">
-              <label class="field-label" for="samBackend">SAM3 Backend</label>
+              <label class="field-label" for="samBackend">SAM3 后端</label>
               <select id="samBackend" class="input">
-                <option value="local">Local (SAM3)</option>
+                <option value="local">本地 (SAM3)</option>
                 <option value="fal">fal.ai API</option>
                 <option value="roboflow" selected>Roboflow API</option>
               </select>
-              <div class="hint">API mode uses FAL_KEY or ROBOFLOW_API_KEY if no key is provided below.</div>
+              <div class="hint">API 模式下若未填写密钥，将使用服务器端的 FAL_KEY 或 ROBOFLOW_API_KEY。</div>
             </div>
 
             <div class="field-group">
-              <label class="field-label" for="samApiKey">SAM3 API Key</label>
+              <label class="field-label" for="samApiKey">SAM3 API 密钥</label>
               <input
                 id="samApiKey"
                 type="password"
                 class="input"
-                placeholder="FAL/Roboflow key (optional)"
+                placeholder="FAL/Roboflow 密钥（可选）"
               />
             </div>
           </details>
         </section>
 
         <section class="actions">
-          <button id="confirmBtn" class="primary">Confirm -> Canvas</button>
+          <button id="confirmBtn" class="primary">开始生成</button>
           <div id="errorMsg" class="error"></div>
         </section>
       </main>
