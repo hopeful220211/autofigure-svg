@@ -328,8 +328,13 @@
       let svgText = "";
       try {
         const response = await fetch(url);
+        if (!response.ok) {
+          previewStepLabel.textContent = "SVG 文件加载失败，请在产物面板中手动下载。";
+          return;
+        }
         svgText = await response.text();
       } catch (err) {
+        previewStepLabel.textContent = "SVG 文件加载失败，请检查网络连接。";
         return;
       }
 
