@@ -29,19 +29,6 @@
 
         <section class="card">
           <div class="field-group">
-            <label class="field-label" for="provider">服务商</label>
-            <select id="provider" class="input">
-              <option value="bianxie" selected>Bianxie</option>
-              <option value="openrouter">OpenRouter</option>
-            </select>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label" for="apiKey">API 密钥</label>
-            <input id="apiKey" type="password" class="input" placeholder="sk-..." />
-          </div>
-
-          <div class="field-group">
             <label class="field-label" for="optimizeIterations">优化迭代次数</label>
             <input id="optimizeIterations" class="input" type="number" min="0" value="0" />
           </div>
@@ -61,28 +48,7 @@
               <input
                 id="referenceImage"
                 class="input"
-                value="refer_figure/2.png"
-              />
-              <div class="hint">上传文件会覆盖上方路径。</div>
-            </div>
-
-            <div class="field-group">
-              <label class="field-label" for="samBackend">SAM3 后端</label>
-              <select id="samBackend" class="input">
-                <option value="local">本地 (SAM3)</option>
-                <option value="fal">fal.ai API</option>
-                <option value="roboflow" selected>Roboflow API</option>
-              </select>
-              <div class="hint">API 模式下若未填写密钥，将使用服务器端的 FAL_KEY 或 ROBOFLOW_API_KEY。</div>
-            </div>
-
-            <div class="field-group">
-              <label class="field-label" for="samApiKey">SAM3 API 密钥</label>
-              <input
-                id="samApiKey"
-                type="password"
-                class="input"
-                placeholder="FAL/Roboflow 密钥（可选）"
+                type="hidden"
               />
             </div>
           </details>

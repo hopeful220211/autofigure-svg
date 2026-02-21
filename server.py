@@ -32,6 +32,11 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 PYTHON_EXECUTABLE = os.environ.get("AUTOFIGURE_PYTHON") or sys.executable
 
+# 从环境变量统一读取密钥和配置
+API_KEY = os.environ.get("API_KEY", "")
+SAM_API_KEY = os.environ.get("ROBOFLOW_API_KEY") or os.environ.get("FAL_KEY") or ""
+DEFAULT_PROVIDER = os.environ.get("AUTOFIGURE_PROVIDER", "openrouter")
+DEFAULT_SAM_BACKEND = "roboflow"
 DEFAULT_SAM_PROMPT = "icon,person,animal,robot"
 DEFAULT_PLACEHOLDER_MODE = "label"
 DEFAULT_MERGE_THRESHOLD = 0.01
@@ -73,17 +78,6 @@ class Job:
 
 class RunRequest(BaseModel):
     method_text: str = Field(..., min_length=1)
-    provider: str = "bianxie"
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
-    image_model: Optional[str] = None
-    svg_model: Optional[str] = None
-    sam_prompt: Optional[str] = None
-    sam_backend: Optional[str] = None
-    sam_api_key: Optional[str] = None
-    sam_max_masks: Optional[int] = None
-    placeholder_mode: Optional[str] = None
-    merge_threshold: Optional[float] = None
     optimize_iterations: Optional[int] = None
     reference_image_path: Optional[str] = None
 
@@ -131,6 +125,12 @@ def run_job(req: RunRequest) -> JSONResponse:
         output_dir = OUTPUTS_DIR / job_id
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        if not API_KEY:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "服务器未配置 API 密钥，请联系管理员设置 API_KEY 环境变量。"},
+            )
+
         cmd = [
             PYTHON_EXECUTABLE,
             str(BASE_DIR / "autofigure2.py"),
@@ -139,33 +139,21 @@ def run_job(req: RunRequest) -> JSONResponse:
             "--output_dir",
             str(output_dir),
             "--provider",
-            req.provider,
+            DEFAULT_PROVIDER,
+            "--api_key",
+            API_KEY,
+            "--sam_backend",
+            DEFAULT_SAM_BACKEND,
+            "--sam_prompt",
+            DEFAULT_SAM_PROMPT,
+            "--placeholder_mode",
+            DEFAULT_PLACEHOLDER_MODE,
+            "--merge_threshold",
+            str(DEFAULT_MERGE_THRESHOLD),
         ]
 
-        if req.api_key:
-            cmd += ["--api_key", req.api_key]
-        if req.base_url:
-            cmd += ["--base_url", req.base_url]
-        if req.image_model:
-            cmd += ["--image_model", req.image_model]
-        if req.svg_model:
-            cmd += ["--svg_model", req.svg_model]
-
-        sam_prompt = req.sam_prompt or DEFAULT_SAM_PROMPT
-        placeholder_mode = req.placeholder_mode or DEFAULT_PLACEHOLDER_MODE
-        merge_threshold = (
-            req.merge_threshold if req.merge_threshold is not None else DEFAULT_MERGE_THRESHOLD
-        )
-
-        cmd += ["--sam_prompt", sam_prompt]
-        cmd += ["--placeholder_mode", placeholder_mode]
-        cmd += ["--merge_threshold", str(merge_threshold)]
-        if req.sam_backend:
-            cmd += ["--sam_backend", req.sam_backend]
-        if req.sam_api_key:
-            cmd += ["--sam_api_key", req.sam_api_key]
-        if req.sam_max_masks is not None:
-            cmd += ["--sam_max_masks", str(req.sam_max_masks)]
+        if SAM_API_KEY:
+            cmd += ["--sam_api_key", SAM_API_KEY]
         if req.optimize_iterations is not None:
             cmd += ["--optimize_iterations", str(req.optimize_iterations)]
 
@@ -185,7 +173,7 @@ def run_job(req: RunRequest) -> JSONResponse:
         # 隐藏 API 密钥，避免泄露到日志
         safe_cmd = []
         skip_next = False
-        for i, part in enumerate(cmd):
+        for part in cmd:
             if skip_next:
                 safe_cmd.append("***")
                 skip_next = False

@@ -68,14 +68,11 @@
       confirmBtn.disabled = true;
       confirmBtn.textContent = "正在启动...";
 
+      const refPath = $("referenceImage") ? $("referenceImage").value.trim() : null;
       const payload = {
         method_text: methodText,
-        provider: $("provider").value,
-        api_key: $("apiKey").value.trim() || null,
         optimize_iterations: parseInt($("optimizeIterations").value, 10),
-        reference_image_path: $("referenceImage").value.trim() || null,
-        sam_backend: $("samBackend").value,
-        sam_api_key: $("samApiKey").value.trim() || null,
+        reference_image_path: refPath || null,
       };
 
       try {
