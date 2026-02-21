@@ -212,6 +212,13 @@ select {
   display: block;
 }
 
+.usage-note {
+  color: #9e9892;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+
 .hint {
   color: var(--muted);
   font-size: 12px;
