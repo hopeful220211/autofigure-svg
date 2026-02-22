@@ -58,6 +58,15 @@
         <section class="actions">
           <button id="confirmBtn" class="primary">开始生成</button>
           <div id="errorMsg" class="error"></div>
+          <div id="progressArea" class="progress-area" style="display:none">
+            <div class="progress-inline">
+              <div class="spinner-inline"></div>
+              <span id="progressLabel" class="progress-label">正在启动...</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-track-fill" id="progressTrackFill"></div>
+            </div>
+          </div>
         </section>
       </main>
     </div>

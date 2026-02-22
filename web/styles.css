@@ -259,6 +259,63 @@ select {
   font-size: 13px;
 }
 
+/* 首页内联进度 */
+.progress-area {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.progress-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.spinner-inline {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.progress-label {
+  font-size: 14px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.progress-track {
+  width: 100%;
+  height: 6px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-track-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), rgba(22, 155, 155, 0.6));
+  border-radius: 3px;
+  transition: width 0.6s ease;
+}
+
+.primary .btn-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
 .canvas-error {
   margin-top: 6px;
   padding: 8px 12px;

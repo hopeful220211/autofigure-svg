@@ -57,6 +57,20 @@
       });
     }
 
+    const progressArea = $("progressArea");
+    const progressLabel = $("progressLabel");
+    const progressTrackFill = $("progressTrackFill");
+
+    const stepLabels = {
+      figure:       { step: 1, text: "步骤 1/5：正在生成图片..." },
+      samed:        { step: 2, text: "步骤 2/5：正在分析图片元素..." },
+      icon_raw:     { step: 3, text: "步骤 3/5：正在处理图标..." },
+      icon_nobg:    { step: 3, text: "步骤 3/5：正在处理图标..." },
+      template_svg: { step: 4, text: "步骤 4/5：正在生成 SVG 模板..." },
+      optimized_svg:{ step: 4, text: "步骤 4/5：正在优化 SVG 模板..." },
+      final_svg:    { step: 5, text: "步骤 5/5：正在组装最终 SVG..." },
+    };
+
     confirmBtn.addEventListener("click", async () => {
       errorMsg.textContent = "";
       const methodText = $("methodText").value.trim();
@@ -66,7 +80,10 @@
       }
 
       confirmBtn.disabled = true;
-      confirmBtn.textContent = "正在启动...";
+      confirmBtn.innerHTML = '<span class="btn-spinner"></span>生成中...';
+      progressArea.style.display = "";
+      progressLabel.textContent = "正在启动任务...";
+      progressTrackFill.style.width = "0%";
 
       const refPath = $("referenceImage") ? $("referenceImage").value.trim() : null;
       const payload = {
@@ -74,6 +91,8 @@
         optimize_iterations: parseInt($("optimizeIterations").value, 10),
         reference_image_path: refPath || null,
       };
+
+      let jobId = null;
 
       try {
         const response = await fetch("/api/run", {
@@ -88,12 +107,57 @@
         }
 
         const data = await response.json();
-        window.location.href = `/canvas.html?job=${encodeURIComponent(data.job_id)}`;
+        jobId = data.job_id;
       } catch (err) {
         errorMsg.textContent = err.message || "启动任务失败";
         confirmBtn.disabled = false;
         confirmBtn.textContent = "开始生成";
+        progressArea.style.display = "none";
+        return;
       }
+
+      // 连接 SSE，在首页实时显示进度
+      progressLabel.textContent = "步骤 1/5：正在生成图片...";
+      progressTrackFill.style.width = "5%";
+
+      const eventSource = new EventSource(`/api/events/${jobId}`);
+      let currentStep = 0;
+
+      eventSource.addEventListener("artifact", (event) => {
+        const data = JSON.parse(event.data);
+        const info = stepLabels[data.kind];
+        if (info && info.step > currentStep) {
+          currentStep = info.step;
+          progressLabel.textContent = info.text;
+          progressTrackFill.style.width = (currentStep / 5 * 100) + "%";
+        }
+      });
+
+      eventSource.addEventListener("status", (event) => {
+        const data = JSON.parse(event.data);
+        if (data.state === "finished") {
+          eventSource.close();
+          if (typeof data.code === "number" && data.code !== 0) {
+            const errText = data.error || "生成失败，请查看日志了解详情。";
+            errorMsg.textContent = errText;
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "开始生成";
+            progressArea.style.display = "none";
+          } else {
+            progressLabel.textContent = "生成完成，正在跳转到编辑器...";
+            progressTrackFill.style.width = "100%";
+            setTimeout(() => {
+              window.location.href = `/canvas.html?job=${encodeURIComponent(jobId)}`;
+            }, 600);
+          }
+        }
+      });
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        // 连接断开但任务可能仍在运行，直接跳转到 canvas 页查看
+        window.location.href = `/canvas.html?job=${encodeURIComponent(jobId)}`;
+      };
     });
   }
 
