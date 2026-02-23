@@ -262,18 +262,33 @@ def stream_events(job_id: str) -> StreamingResponse:
         raise HTTPException(status_code=404, detail="Job not found")
 
     def event_stream():
+        keepalive_counter = 0
         while True:
             try:
                 item = job.queue.get(timeout=1.0)
             except queue.Empty:
                 if job.done:
                     break
+                # 每 ~15 秒发送心跳，防止代理因空闲断开
+                keepalive_counter += 1
+                if keepalive_counter >= 15:
+                    keepalive_counter = 0
+                    yield ": keepalive\n\n"
                 continue
+            keepalive_counter = 0
             if item.get("event") == "close":
                 break
             yield _format_sse(item["event"], item["data"])
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/artifacts-list/{job_id}")

@@ -141,44 +141,62 @@
       progressLabel.textContent = "步骤 1/5：正在生成图片...";
       progressTrackFill.style.width = "5%";
 
-      const eventSource = new EventSource(`/api/events/${jobId}`);
       let currentStep = 0;
+      let sseFinished = false;
+      let retryCount = 0;
+      const MAX_RETRIES = 5;
 
-      eventSource.addEventListener("artifact", (event) => {
-        const data = JSON.parse(event.data);
-        const info = stepLabels[data.kind];
-        if (info && info.step > currentStep) {
-          currentStep = info.step;
-          const time = stepTimes[currentStep] || "";
-          progressLabel.textContent = `${info.text} ${time}`;
-          progressTrackFill.style.width = (currentStep / 5 * 100) + "%";
-          confirmBtn.innerHTML = `<span class="btn-spinner"></span>生成中... ${time}`;
-        }
-      });
+      function connectSSE() {
+        const es = new EventSource(`/api/events/${jobId}`);
 
-      eventSource.addEventListener("status", (event) => {
-        const data = JSON.parse(event.data);
-        if (data.state === "finished") {
-          eventSource.close();
-          if (typeof data.code === "number" && data.code !== 0) {
-            errorMsg.textContent = data.error || "生成失败，请查看日志了解详情。";
-            confirmBtn.disabled = false;
-            confirmBtn.textContent = "开始生成";
-            progressArea.style.display = "none";
-          } else {
-            progressLabel.textContent = "生成完成，正在跳转到结果页...";
-            progressTrackFill.style.width = "100%";
-            setTimeout(() => {
-              window.location.href = `/canvas.html?job=${encodeURIComponent(jobId)}`;
-            }, 600);
+        es.addEventListener("artifact", (event) => {
+          retryCount = 0;
+          const data = JSON.parse(event.data);
+          const info = stepLabels[data.kind];
+          if (info && info.step > currentStep) {
+            currentStep = info.step;
+            const time = stepTimes[currentStep] || "";
+            progressLabel.textContent = `${info.text} ${time}`;
+            progressTrackFill.style.width = (currentStep / 5 * 100) + "%";
+            confirmBtn.innerHTML = `<span class="btn-spinner"></span>生成中... ${time}`;
           }
-        }
-      });
+        });
 
-      eventSource.onerror = () => {
-        eventSource.close();
-        window.location.href = `/canvas.html?job=${encodeURIComponent(jobId)}`;
-      };
+        es.addEventListener("status", (event) => {
+          const data = JSON.parse(event.data);
+          if (data.state === "finished") {
+            sseFinished = true;
+            es.close();
+            if (typeof data.code === "number" && data.code !== 0) {
+              errorMsg.textContent = data.error || "生成失败，请查看日志了解详情。";
+              confirmBtn.disabled = false;
+              confirmBtn.textContent = "开始生成";
+              progressArea.style.display = "none";
+            } else {
+              progressLabel.textContent = "生成完成，正在跳转到结果页...";
+              progressTrackFill.style.width = "100%";
+              setTimeout(() => {
+                window.location.href = `/canvas.html?job=${encodeURIComponent(jobId)}`;
+              }, 600);
+            }
+          }
+        });
+
+        es.onerror = () => {
+          es.close();
+          if (sseFinished) return;
+          retryCount++;
+          if (retryCount <= MAX_RETRIES) {
+            progressLabel.textContent = "连接中断，正在重连...";
+            setTimeout(connectSSE, 3000);
+          } else {
+            // 重连多次失败，跳转到结果页查看
+            window.location.href = `/canvas.html?job=${encodeURIComponent(jobId)}`;
+          }
+        };
+      }
+
+      connectSSE();
     });
 
     async function uploadReference(file) {
@@ -300,73 +318,87 @@
     }
 
     const artifacts = new Set();
-    const eventSource = new EventSource(`/api/events/${jobId}`);
     let isFinished = false;
+    let sseRetryCount = 0;
+    const SSE_MAX_RETRIES = 8;
 
-    eventSource.addEventListener("artifact", (event) => {
-      const data = JSON.parse(event.data);
-      if (artifacts.has(data.path)) return;
-      artifacts.add(data.path);
+    function connectSSE() {
+      const es = new EventSource(`/api/events/${jobId}`);
 
-      // Show figure
-      if (data.kind === "figure") {
-        figureCard.style.display = "";
-        figureImg.src = data.url;
-        figureDlBtn.href = data.url;
-        figureDlBtn.download = data.name;
-      }
+      es.addEventListener("artifact", (event) => {
+        sseRetryCount = 0;
+        const data = JSON.parse(event.data);
+        if (artifacts.has(data.path)) return;
+        artifacts.add(data.path);
 
-      // Collect SVGs
-      if (data.kind === "template_svg" || data.kind === "optimized_svg" || data.kind === "final_svg") {
-        collectedSvgs.push(data);
-        renderSvgList();
-      }
+        if (data.kind === "figure") {
+          figureCard.style.display = "";
+          figureImg.src = data.url;
+          figureDlBtn.href = data.url;
+          figureDlBtn.download = data.name;
+        }
 
-      if (stepMap[data.kind] && stepMap[data.kind].step > currentStep) {
-        updateProgress(stepMap[data.kind].step);
-        statusText.textContent = `${currentStep}/5 - ${stepMap[data.kind].label}`;
-      }
-    });
+        if (data.kind === "template_svg" || data.kind === "optimized_svg" || data.kind === "final_svg") {
+          collectedSvgs.push(data);
+          renderSvgList();
+        }
 
-    eventSource.addEventListener("status", (event) => {
-      const data = JSON.parse(event.data);
-      if (data.state === "started") {
-        statusText.textContent = "运行中";
-        cancelBtn.style.display = "";
-      } else if (data.state === "finished") {
-        isFinished = true;
-        cancelBtn.style.display = "none";
-        if (typeof data.code === "number" && data.code !== 0) {
-          statusText.textContent = "生成失败";
-          statusChip.classList.add("error");
-          errorCard.style.display = "";
-          errorDetail.textContent = data.error || "未知错误，请查看日志。";
-          logPanel.classList.add("open");
-          progressSection.style.display = "none";
+        if (stepMap[data.kind] && stepMap[data.kind].step > currentStep) {
+          updateProgress(stepMap[data.kind].step);
+          statusText.textContent = `${currentStep}/5 - ${stepMap[data.kind].label}`;
+        }
+      });
+
+      es.addEventListener("status", (event) => {
+        sseRetryCount = 0;
+        const data = JSON.parse(event.data);
+        if (data.state === "started") {
+          statusText.textContent = "运行中";
+          cancelBtn.style.display = "";
+        } else if (data.state === "finished") {
+          isFinished = true;
+          es.close();
+          cancelBtn.style.display = "none";
+          if (typeof data.code === "number" && data.code !== 0) {
+            statusText.textContent = "生成失败";
+            statusChip.classList.add("error");
+            errorCard.style.display = "";
+            errorDetail.textContent = data.error || "未知错误，请查看日志。";
+            logPanel.classList.add("open");
+            progressSection.style.display = "none";
+          } else {
+            statusText.textContent = "已完成";
+            statusChip.classList.add("done");
+            updateProgress(5);
+            progressStatus.textContent = "所有步骤已完成";
+            resultFooter.style.display = "";
+            fetchArtifactList();
+          }
+        }
+      });
+
+      es.addEventListener("log", (event) => {
+        sseRetryCount = 0;
+        const data = JSON.parse(event.data);
+        appendLogLine(logBody, data);
+      });
+
+      es.onerror = () => {
+        es.close();
+        if (isFinished) return;
+        sseRetryCount++;
+        if (sseRetryCount <= SSE_MAX_RETRIES) {
+          statusText.textContent = "连接中断，正在重连...";
+          setTimeout(connectSSE, 3000);
         } else {
-          statusText.textContent = "已完成";
-          statusChip.classList.add("done");
-          updateProgress(5);
-          progressStatus.textContent = "所有步骤已完成";
-          resultFooter.style.display = "";
-          // Also fetch full artifact list
+          statusText.textContent = "连接已断开";
+          cancelBtn.style.display = "none";
           fetchArtifactList();
         }
-      }
-    });
+      };
+    }
 
-    eventSource.addEventListener("log", (event) => {
-      const data = JSON.parse(event.data);
-      appendLogLine(logBody, data);
-    });
-
-    eventSource.onerror = () => {
-      if (isFinished) { eventSource.close(); return; }
-      statusText.textContent = "连接已断开";
-      cancelBtn.style.display = "none";
-      // Try to fetch artifacts anyway
-      fetchArtifactList();
-    };
+    connectSSE();
 
     function renderSvgList() {
       svgCard.style.display = "";
