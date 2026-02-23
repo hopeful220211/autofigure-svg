@@ -1,15 +1,9 @@
 (() => {
-
   const page = document.body.dataset.page;
-  if (page === "input") {
-    initInputPage();
-  } else if (page === "canvas") {
-    initCanvasPage();
-  }
+  if (page === "input") initInputPage();
+  else if (page === "canvas") initCanvasPage();
 
-  function $(id) {
-    return document.getElementById(id);
-  }
+  function $(id) { return document.getElementById(id); }
 
   function parseErrorMessage(text) {
     try {
@@ -24,6 +18,7 @@
     return text;
   }
 
+  /* ========== Input Page ========== */
   function initInputPage() {
     const confirmBtn = $("confirmBtn");
     const errorMsg = $("errorMsg");
@@ -31,33 +26,45 @@
     const referenceFile = $("referenceFile");
     const referencePreview = $("referencePreview");
     const referenceStatus = $("referenceStatus");
+    const uploadPlaceholder = $("uploadPlaceholder");
+    const uploadPreviewWrap = $("uploadPreviewWrap");
+    const uploadRemove = $("uploadRemove");
+    const methodText = $("methodText");
+    const chineseHint = $("chineseHint");
 
+    // 中文检测
+    if (methodText && chineseHint) {
+      methodText.addEventListener("input", () => {
+        const hasChinese = /[\u4e00-\u9fff]/.test(methodText.value);
+        chineseHint.style.display = hasChinese ? "flex" : "none";
+      });
+    }
+
+    // 上传区域
     if (uploadZone && referenceFile) {
-      // 阻止 input 的 click 冒泡到 uploadZone，防止弹两次文件选择框
-      referenceFile.addEventListener("click", (event) => {
-        event.stopPropagation();
-      });
+      referenceFile.addEventListener("click", (e) => e.stopPropagation());
       uploadZone.addEventListener("click", () => referenceFile.click());
-      uploadZone.addEventListener("dragover", (event) => {
-        event.preventDefault();
-        uploadZone.classList.add("dragging");
-      });
-      uploadZone.addEventListener("dragleave", () => {
+      uploadZone.addEventListener("dragover", (e) => { e.preventDefault(); uploadZone.classList.add("dragging"); });
+      uploadZone.addEventListener("dragleave", () => uploadZone.classList.remove("dragging"));
+      uploadZone.addEventListener("drop", (e) => {
+        e.preventDefault();
         uploadZone.classList.remove("dragging");
-      });
-      uploadZone.addEventListener("drop", (event) => {
-        event.preventDefault();
-        uploadZone.classList.remove("dragging");
-        const file = event.dataTransfer.files[0];
-        if (file) {
-          uploadReference(file, confirmBtn, referencePreview, referenceStatus);
-        }
+        if (e.dataTransfer.files[0]) uploadReference(e.dataTransfer.files[0]);
       });
       referenceFile.addEventListener("change", () => {
-        const file = referenceFile.files[0];
-        if (file) {
-          uploadReference(file, confirmBtn, referencePreview, referenceStatus);
-        }
+        if (referenceFile.files[0]) uploadReference(referenceFile.files[0]);
+      });
+    }
+
+    // 删除上传图片
+    if (uploadRemove) {
+      uploadRemove.addEventListener("click", (e) => {
+        e.stopPropagation();
+        $("referenceImage").value = "";
+        referenceFile.value = "";
+        uploadPreviewWrap.style.display = "none";
+        uploadPlaceholder.style.display = "";
+        referenceStatus.textContent = "";
       });
     }
 
@@ -66,19 +73,27 @@
     const progressTrackFill = $("progressTrackFill");
 
     const stepLabels = {
-      figure:       { step: 1, text: "步骤 1/5：正在生成图片..." },
-      samed:        { step: 2, text: "步骤 2/5：正在分析图片元素..." },
-      icon_raw:     { step: 3, text: "步骤 3/5：正在处理图标..." },
-      icon_nobg:    { step: 3, text: "步骤 3/5：正在处理图标..." },
-      template_svg: { step: 4, text: "步骤 4/5：正在生成 SVG 模板..." },
-      optimized_svg:{ step: 4, text: "步骤 4/5：正在优化 SVG 模板..." },
-      final_svg:    { step: 5, text: "步骤 5/5：正在组装最终 SVG..." },
+      figure:        { step: 1, text: "步骤 1/5：正在生成图片..." },
+      samed:         { step: 2, text: "步骤 2/5：正在分析图片元素..." },
+      icon_raw:      { step: 3, text: "步骤 3/5：正在处理图标..." },
+      icon_nobg:     { step: 3, text: "步骤 3/5：正在处理图标..." },
+      template_svg:  { step: 4, text: "步骤 4/5：正在生成 SVG 模板..." },
+      optimized_svg: { step: 4, text: "步骤 4/5：正在优化 SVG 模板..." },
+      final_svg:     { step: 5, text: "步骤 5/5：正在组装最终 SVG..." },
+    };
+
+    const stepTimes = {
+      1: "预计还需 2-3 分钟",
+      2: "预计还需 1-2 分钟",
+      3: "预计还需 1 分钟",
+      4: "预计还需 30 秒",
+      5: "即将完成...",
     };
 
     confirmBtn.addEventListener("click", async () => {
       errorMsg.textContent = "";
-      const methodText = $("methodText").value.trim();
-      if (!methodText) {
+      const text = methodText.value.trim();
+      if (!text) {
         errorMsg.textContent = "请输入论文方法描述文本。";
         return;
       }
@@ -89,27 +104,30 @@
       progressLabel.textContent = "正在启动任务...";
       progressTrackFill.style.width = "0%";
 
+      // 如果检测到中文，先显示翻译提示
+      if (/[\u4e00-\u9fff]/.test(text)) {
+        progressLabel.textContent = "正在翻译中文文本...";
+        progressTrackFill.style.width = "2%";
+      }
+
       const refPath = $("referenceImage") ? $("referenceImage").value.trim() : null;
       const payload = {
-        method_text: methodText,
+        method_text: text,
         optimize_iterations: parseInt($("optimizeIterations").value, 10),
         reference_image_path: refPath || null,
       };
 
       let jobId = null;
-
       try {
         const response = await fetch("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-
         if (!response.ok) {
-          const text = await response.text();
-          throw new Error(parseErrorMessage(text || "请求失败"));
+          const t = await response.text();
+          throw new Error(parseErrorMessage(t || "请求失败"));
         }
-
         const data = await response.json();
         jobId = data.job_id;
       } catch (err) {
@@ -120,7 +138,6 @@
         return;
       }
 
-      // 连接 SSE，在首页实时显示进度
       progressLabel.textContent = "步骤 1/5：正在生成图片...";
       progressTrackFill.style.width = "5%";
 
@@ -132,8 +149,10 @@
         const info = stepLabels[data.kind];
         if (info && info.step > currentStep) {
           currentStep = info.step;
-          progressLabel.textContent = info.text;
+          const time = stepTimes[currentStep] || "";
+          progressLabel.textContent = `${info.text} ${time}`;
           progressTrackFill.style.width = (currentStep / 5 * 100) + "%";
+          confirmBtn.innerHTML = `<span class="btn-spinner"></span>生成中... ${time}`;
         }
       });
 
@@ -142,13 +161,12 @@
         if (data.state === "finished") {
           eventSource.close();
           if (typeof data.code === "number" && data.code !== 0) {
-            const errText = data.error || "生成失败，请查看日志了解详情。";
-            errorMsg.textContent = errText;
+            errorMsg.textContent = data.error || "生成失败，请查看日志了解详情。";
             confirmBtn.disabled = false;
             confirmBtn.textContent = "开始生成";
             progressArea.style.display = "none";
           } else {
-            progressLabel.textContent = "生成完成，正在跳转到编辑器...";
+            progressLabel.textContent = "生成完成，正在跳转到结果页...";
             progressTrackFill.style.width = "100%";
             setTimeout(() => {
               window.location.href = `/canvas.html?job=${encodeURIComponent(jobId)}`;
@@ -159,72 +177,68 @@
 
       eventSource.onerror = () => {
         eventSource.close();
-        // 连接断开但任务可能仍在运行，直接跳转到 canvas 页查看
         window.location.href = `/canvas.html?job=${encodeURIComponent(jobId)}`;
       };
     });
-  }
 
-  async function uploadReference(file, confirmBtn, previewEl, statusEl) {
-    if (!file.type.startsWith("image/")) {
-      statusEl.textContent = "仅支持图片文件。";
-      return;
-    }
-
-    confirmBtn.disabled = true;
-    statusEl.textContent = "正在上传参考图...";
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    try {
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(parseErrorMessage(text || "上传失败"));
+    async function uploadReference(file) {
+      if (!file.type.startsWith("image/")) {
+        referenceStatus.textContent = "仅支持图片文件。";
+        return;
       }
+      confirmBtn.disabled = true;
+      referenceStatus.textContent = "正在上传参考图...";
 
-      const data = await response.json();
-      const referenceInput = $("referenceImage");
-      if (referenceInput) {
-        referenceInput.value = data.path;
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const response = await fetch("/api/upload", { method: "POST", body: formData });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(parseErrorMessage(text || "上传失败"));
+        }
+        const data = await response.json();
+        $("referenceImage").value = data.path;
+        referenceStatus.textContent = `已上传：${data.name}`;
+        if (referencePreview) {
+          referencePreview.src = data.url || "";
+          uploadPlaceholder.style.display = "none";
+          uploadPreviewWrap.style.display = "";
+        }
+      } catch (err) {
+        referenceStatus.textContent = err.message || "上传失败";
+      } finally {
+        confirmBtn.disabled = false;
       }
-      statusEl.textContent = `已使用上传的参考图：${data.name}`;
-      if (previewEl) {
-        previewEl.src = data.url || "";
-        previewEl.classList.add("visible");
-      }
-    } catch (err) {
-      statusEl.textContent = err.message || "上传失败";
-    } finally {
-      confirmBtn.disabled = false;
     }
   }
 
-  async function initCanvasPage() {
+  /* ========== Canvas / Results Page ========== */
+  function initCanvasPage() {
     const params = new URLSearchParams(window.location.search);
     const jobId = params.get("job");
     const statusText = $("statusText");
+    const statusChip = $("statusChip");
     const jobIdEl = $("jobId");
-    const artifactPanel = $("artifactPanel");
-    const artifactList = $("artifactList");
-    const toggle = $("artifactToggle");
     const logToggle = $("logToggle");
     const logPanel = $("logPanel");
+    const logClose = $("logClose");
     const logBody = $("logBody");
-    const iframe = $("svgEditorFrame");
-    const fallback = $("svgFallback");
-    const fallbackObject = $("fallbackObject");
     const cancelBtn = $("cancelBtn");
     const progressFill = $("progressFill");
     const progressSteps = $("progressSteps");
-    const previewOverlay = $("previewOverlay");
-    const previewImage = $("previewImage");
-    const previewStepLabel = $("previewStepLabel");
+    const progressSection = $("progressSection");
+    const progressStatus = $("progressStatus");
+    const figureCard = $("figureCard");
+    const figureImg = $("figureImg");
+    const figureDlBtn = $("figureDlBtn");
+    const svgCard = $("svgCard");
+    const svgList = $("svgList");
+    const downloadAllSvg = $("downloadAllSvg");
+    const errorCard = $("errorCard");
+    const errorDetail = $("errorDetail");
+    const resultFooter = $("resultFooter");
 
     if (!jobId) {
       statusText.textContent = "缺少任务 ID";
@@ -233,15 +247,11 @@
 
     jobIdEl.textContent = jobId;
 
-    toggle.addEventListener("click", () => {
-      artifactPanel.classList.toggle("open");
-    });
+    // Log panel toggles
+    logToggle.addEventListener("click", () => logPanel.classList.toggle("open"));
+    if (logClose) logClose.addEventListener("click", () => logPanel.classList.remove("open"));
 
-    logToggle.addEventListener("click", () => {
-      logPanel.classList.toggle("open");
-    });
-
-    // 取消任务
+    // Cancel
     cancelBtn.addEventListener("click", async () => {
       if (!confirm("确定要取消当前任务吗？")) return;
       try {
@@ -251,71 +261,41 @@
       } catch (_) {}
     });
 
-    let svgEditAvailable = false;
-    let svgEditPath = null;
-    try {
-      const configRes = await fetch("/api/config");
-      if (configRes.ok) {
-        const config = await configRes.json();
-        svgEditAvailable = Boolean(config.svgEditAvailable);
-        svgEditPath = config.svgEditPath || null;
-      }
-    } catch (err) {
-      svgEditAvailable = false;
-    }
-
-    if (svgEditAvailable && svgEditPath) {
-      iframe.src = svgEditPath;
-    } else {
-      fallback.classList.add("active");
-      iframe.style.display = "none";
-    }
-
-    let svgReady = false;
-    let pendingSvgText = null;
-
-    iframe.addEventListener("load", () => {
-      svgReady = true;
-      if (pendingSvgText) {
-        tryLoadSvg(pendingSvgText);
-        pendingSvgText = null;
-      }
-    });
-
     const stepMap = {
-      figure: { step: 1, label: "图片已生成" },
-      samed: { step: 2, label: "SAM3 分割完成" },
-      icon_raw: { step: 3, label: "图标已提取" },
-      icon_nobg: { step: 3, label: "图标已去背景" },
-      template_svg: { step: 4, label: "模板 SVG 已就绪" },
+      figure:        { step: 1, label: "图片已生成" },
+      samed:         { step: 2, label: "SAM 分割完成" },
+      icon_raw:      { step: 3, label: "图标已提取" },
+      icon_nobg:     { step: 3, label: "图标已去背景" },
+      template_svg:  { step: 4, label: "模板 SVG 已就绪" },
       optimized_svg: { step: 4, label: "优化模板已就绪" },
-      final_svg: { step: 5, label: "最终 SVG 已就绪" },
+      final_svg:     { step: 5, label: "最终 SVG 已就绪" },
     };
 
-    const previewLabels = {
+    const statusLabels = {
       0: "正在生成图片...",
-      1: "正在进行 SAM3 分割...",
+      1: "正在进行 SAM 分割...",
       2: "正在提取图标...",
       3: "正在生成 SVG 模板...",
       4: "正在最终合成...",
     };
 
     let currentStep = 0;
+    const collectedSvgs = [];
 
     function updateProgress(step) {
       currentStep = step;
       const pct = Math.round((step / 5) * 100);
       progressFill.style.width = pct + "%";
 
-      const steps = progressSteps.querySelectorAll(".progress-step");
-      steps.forEach((el) => {
+      const items = progressSteps.querySelectorAll(".step-item");
+      items.forEach((el) => {
         const s = parseInt(el.dataset.step, 10);
         el.classList.toggle("done", s < step);
         el.classList.toggle("active", s === step);
       });
 
-      if (previewLabels[step] !== undefined) {
-        previewStepLabel.textContent = previewLabels[step];
+      if (statusLabels[step] !== undefined) {
+        progressStatus.textContent = statusLabels[step];
       }
     }
 
@@ -323,28 +303,28 @@
     const eventSource = new EventSource(`/api/events/${jobId}`);
     let isFinished = false;
 
-    eventSource.addEventListener("artifact", async (event) => {
+    eventSource.addEventListener("artifact", (event) => {
       const data = JSON.parse(event.data);
-      if (!artifacts.has(data.path)) {
-        artifacts.add(data.path);
-        addArtifactCard(artifactList, data);
+      if (artifacts.has(data.path)) return;
+      artifacts.add(data.path);
+
+      // Show figure
+      if (data.kind === "figure") {
+        figureCard.style.display = "";
+        figureImg.src = data.url;
+        figureDlBtn.href = data.url;
+        figureDlBtn.download = data.name;
       }
 
-      // 在 SVG 就绪前，显示中间产物图片预览
-      if (data.kind === "figure" || data.kind === "samed") {
-        previewImage.src = data.url;
-        previewImage.classList.add("visible");
-      }
-
+      // Collect SVGs
       if (data.kind === "template_svg" || data.kind === "optimized_svg" || data.kind === "final_svg") {
-        // 隐藏预览层，显示 SVG 编辑器
-        previewOverlay.classList.add("hidden");
-        await loadSvgAsset(data.url);
+        collectedSvgs.push(data);
+        renderSvgList();
       }
 
       if (stepMap[data.kind] && stepMap[data.kind].step > currentStep) {
         updateProgress(stepMap[data.kind].step);
-        statusText.textContent = `第 ${currentStep}/5 步 - ${stepMap[data.kind].label}`;
+        statusText.textContent = `${currentStep}/5 - ${stepMap[data.kind].label}`;
       }
     });
 
@@ -357,20 +337,20 @@
         isFinished = true;
         cancelBtn.style.display = "none";
         if (typeof data.code === "number" && data.code !== 0) {
-          const errorDetail = data.error || "";
-          statusText.innerHTML = `<span style="color:#e74c3c">生成失败</span>`;
-          progressFill.style.background = "linear-gradient(90deg, #c44536, rgba(196, 69, 54, 0.6))";
-          if (errorDetail) {
-            const errorEl = document.createElement("div");
-            errorEl.className = "canvas-error";
-            errorEl.textContent = errorDetail;
-            statusText.parentElement.appendChild(errorEl);
-          }
+          statusText.textContent = "生成失败";
+          statusChip.classList.add("error");
+          errorCard.style.display = "";
+          errorDetail.textContent = data.error || "未知错误，请查看日志。";
           logPanel.classList.add("open");
+          progressSection.style.display = "none";
         } else {
           statusText.textContent = "已完成";
+          statusChip.classList.add("done");
           updateProgress(5);
-          previewOverlay.classList.add("hidden");
+          progressStatus.textContent = "所有步骤已完成";
+          resultFooter.style.display = "";
+          // Also fetch full artifact list
+          fetchArtifactList();
         }
       }
     });
@@ -381,123 +361,104 @@
     });
 
     eventSource.onerror = () => {
-      if (isFinished) {
-        eventSource.close();
-        return;
-      }
+      if (isFinished) { eventSource.close(); return; }
       statusText.textContent = "连接已断开";
       cancelBtn.style.display = "none";
+      // Try to fetch artifacts anyway
+      fetchArtifactList();
     };
 
-    async function loadSvgAsset(url) {
-      let svgText = "";
-      try {
-        const response = await fetch(url);
-        if (!response.ok) {
-          previewStepLabel.textContent = "SVG 文件加载失败，请在产物面板中手动下载。";
-          return;
-        }
-        svgText = await response.text();
-      } catch (err) {
-        previewStepLabel.textContent = "SVG 文件加载失败，请检查网络连接。";
-        return;
-      }
+    function renderSvgList() {
+      svgCard.style.display = "";
+      svgList.innerHTML = "";
 
-      if (svgEditAvailable) {
-        if (!svgEditPath) {
-          return;
-        }
-        if (!svgReady) {
-          pendingSvgText = svgText;
-          return;
-        }
+      const kindLabels = {
+        template_svg: "模板 SVG",
+        optimized_svg: "优化模板",
+        final_svg: "最终版本",
+      };
 
-        const loaded = tryLoadSvg(svgText);
-        if (!loaded) {
-          iframe.src = `${svgEditPath}?url=${encodeURIComponent(url)}`;
-        }
-      } else {
-        fallbackObject.data = url;
-      }
+      collectedSvgs.forEach((svg) => {
+        const item = document.createElement("div");
+        item.className = "svg-item";
+
+        const preview = document.createElement("div");
+        preview.className = "svg-item-preview";
+        const obj = document.createElement("object");
+        obj.type = "image/svg+xml";
+        obj.data = svg.url;
+        preview.appendChild(obj);
+
+        const info = document.createElement("div");
+        info.className = "svg-item-info";
+        info.innerHTML = `<div class="svg-item-name">${svg.name}</div><div class="svg-item-kind">${kindLabels[svg.kind] || svg.kind}</div>`;
+
+        const dl = document.createElement("a");
+        dl.className = "btn-download";
+        dl.href = svg.url;
+        dl.download = svg.name;
+        dl.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>下载';
+
+        item.appendChild(preview);
+        item.appendChild(info);
+        item.appendChild(dl);
+        svgList.appendChild(item);
+      });
     }
 
-    function tryLoadSvg(svgText) {
-      if (!iframe.contentWindow) {
-        return false;
-      }
+    // Download all SVGs
+    if (downloadAllSvg) {
+      downloadAllSvg.addEventListener("click", () => {
+        collectedSvgs.forEach((svg) => {
+          const a = document.createElement("a");
+          a.href = svg.url;
+          a.download = svg.name;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        });
+      });
+    }
 
-      const win = iframe.contentWindow;
-      if (win.svgEditor && typeof win.svgEditor.loadFromString === "function") {
-        win.svgEditor.loadFromString(svgText);
-        return true;
-      }
-      if (win.svgCanvas && typeof win.svgCanvas.setSvgString === "function") {
-        win.svgCanvas.setSvgString(svgText);
-        return true;
-      }
-      return false;
+    async function fetchArtifactList() {
+      try {
+        const res = await fetch(`/api/artifacts-list/${jobId}`);
+        if (!res.ok) return;
+        const items = await res.json();
+
+        items.forEach((item) => {
+          if (artifacts.has(item.path)) return;
+          artifacts.add(item.path);
+
+          if (item.kind === "figure" && figureCard.style.display === "none") {
+            figureCard.style.display = "";
+            figureImg.src = item.url;
+            figureDlBtn.href = item.url;
+            figureDlBtn.download = item.name;
+          }
+
+          if (item.kind === "template_svg" || item.kind === "optimized_svg" || item.kind === "final_svg") {
+            if (!collectedSvgs.find(s => s.path === item.path)) {
+              collectedSvgs.push(item);
+            }
+          }
+        });
+
+        if (collectedSvgs.length > 0) renderSvgList();
+        if (figureCard.style.display !== "none" || collectedSvgs.length > 0) {
+          resultFooter.style.display = "";
+        }
+      } catch (_) {}
     }
   }
 
+  /* ========== Shared Helpers ========== */
   function appendLogLine(container, data) {
     const line = `[${data.stream}] ${data.line}`;
     const lines = container.textContent.split("\n").filter(Boolean);
     lines.push(line);
-    if (lines.length > 200) {
-      lines.splice(0, lines.length - 200);
-    }
+    if (lines.length > 200) lines.splice(0, lines.length - 200);
     container.textContent = lines.join("\n");
     container.scrollTop = container.scrollHeight;
-  }
-
-  function addArtifactCard(container, data) {
-    const card = document.createElement("a");
-    card.className = "artifact-card";
-    card.href = data.url;
-    card.target = "_blank";
-    card.rel = "noreferrer";
-
-    const img = document.createElement("img");
-    img.src = data.url;
-    img.alt = data.name;
-    img.loading = "lazy";
-
-    const meta = document.createElement("div");
-    meta.className = "artifact-meta";
-
-    const name = document.createElement("div");
-    name.className = "artifact-name";
-    name.textContent = data.name;
-
-    const badge = document.createElement("div");
-    badge.className = "artifact-badge";
-    badge.textContent = formatKind(data.kind);
-
-    meta.appendChild(name);
-    meta.appendChild(badge);
-    card.appendChild(img);
-    card.appendChild(meta);
-    container.prepend(card);
-  }
-
-  function formatKind(kind) {
-    switch (kind) {
-      case "figure":
-        return "生成图";
-      case "samed":
-        return "分割图";
-      case "icon_raw":
-        return "原始图标";
-      case "icon_nobg":
-        return "去背景图标";
-      case "template_svg":
-        return "模板";
-      case "optimized_svg":
-        return "优化模板";
-      case "final_svg":
-        return "最终版";
-      default:
-        return "产物";
-    }
   }
 })();

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import shutil
 import signal
 import socket
@@ -43,19 +44,6 @@ DEFAULT_PLACEHOLDER_MODE = "label"
 DEFAULT_MERGE_THRESHOLD = 0.01
 JOB_TIMEOUT_SECONDS = 600  # 10 分钟超时
 JOB_RETENTION_SECONDS = 3600  # 已完成任务保留 1 小时
-
-SVG_EDIT_CANDIDATES = [
-    ("vendor/svg-edit/editor/index.html", WEB_DIR / "vendor" / "svg-edit" / "editor" / "index.html"),
-    ("vendor/svg-edit/editor.html", WEB_DIR / "vendor" / "svg-edit" / "editor.html"),
-    ("vendor/svg-edit/index.html", WEB_DIR / "vendor" / "svg-edit" / "index.html"),
-]
-
-
-def _resolve_svg_edit_path() -> tuple[bool, str | None]:
-    for rel, path in SVG_EDIT_CANDIDATES:
-        if path.is_file():
-            return True, f"/{rel}"
-    return False, None
 
 
 @dataclass
@@ -117,11 +105,6 @@ async def internal_error_handler(request: Request, exc: Exception):
     )
 
 
-@app.get("/api/config")
-def get_config() -> JSONResponse:
-    available, rel_path = _resolve_svg_edit_path()
-    return JSONResponse({"svgEditAvailable": available, "svgEditPath": rel_path})
-
 
 @app.post("/api/run")
 def run_job(req: RunRequest) -> JSONResponse:
@@ -137,11 +120,19 @@ def run_job(req: RunRequest) -> JSONResponse:
                 content={"error": "服务器未配置 API 密钥，请联系管理员设置 API_KEY 环境变量。"},
             )
 
+        # 检测中文并翻译
+        method_text = req.method_text
+        if re.search(r'[\u4e00-\u9fff]', method_text):
+            try:
+                method_text = _translate_chinese(method_text)
+            except Exception as e:
+                print(f"[translate] 翻译失败，使用原文: {e}")
+
         cmd = [
             PYTHON_EXECUTABLE,
             str(BASE_DIR / "autofigure2.py"),
             "--method_text",
-            req.method_text,
+            method_text,
             "--output_dir",
             str(output_dir),
             "--provider",
@@ -285,6 +276,26 @@ def stream_events(job_id: str) -> StreamingResponse:
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@app.get("/api/artifacts-list/{job_id}")
+def list_artifacts(job_id: str) -> JSONResponse:
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    items = []
+    for path in sorted(job.output_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(job.output_dir).as_posix()
+        kind = _classify_artifact(rel)
+        items.append({
+            "kind": kind,
+            "name": path.name,
+            "path": rel,
+            "url": f"/api/artifacts/{job_id}/{rel}",
+        })
+    return JSONResponse(items)
+
+
 @app.get("/api/artifacts/{job_id}/{path:path}")
 def get_artifact(job_id: str, path: str) -> FileResponse:
     job = JOBS.get(job_id)
@@ -307,6 +318,41 @@ def get_upload(filename: str) -> FileResponse:
     if not candidate.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(candidate)
+
+
+def _translate_chinese(text: str) -> str:
+    """使用 OpenRouter API 将中文文本翻译为英文"""
+    import requests as _requests
+
+    base_url = "https://openrouter.ai/api/v1/chat/completions"
+    referer = os.environ.get('OPENROUTER_REFERER', 'https://autofigure.app')
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {API_KEY}',
+        'HTTP-Referer': referer,
+        'X-Title': 'AutoFigure',
+    }
+    payload = {
+        'model': 'google/gemini-2.0-flash-001',
+        'messages': [
+            {'role': 'system', 'content': 'You are a scientific translator. Translate the following Chinese text into English. Keep scientific terminology accurate. Output ONLY the translated text, nothing else.'},
+            {'role': 'user', 'content': text},
+        ],
+        'max_tokens': 4000,
+        'temperature': 0.3,
+        'stream': False,
+    }
+    resp = _requests.post(base_url, headers=headers, json=payload, timeout=60)
+    if resp.status_code != 200:
+        raise Exception(f"Translation API error: {resp.status_code}")
+    result = resp.json()
+    choices = result.get('choices', [])
+    if choices:
+        translated = choices[0].get('message', {}).get('content', '').strip()
+        if translated:
+            print(f"[translate] 翻译完成: {text[:50]}... -> {translated[:50]}...")
+            return translated
+    raise Exception("Translation returned empty result")
 
 
 def _format_sse(event: str, data: dict) -> str:

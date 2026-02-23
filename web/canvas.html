@@ -3,83 +3,99 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AI 科研绘图 - 编辑器</title>
+    <title>AutoFigure - 生成结果</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=20260223" />
+    <link rel="stylesheet" href="/styles.css?v=20260223b" />
   </head>
   <body data-page="canvas">
-    <div class="canvas-page">
-      <header class="topbar">
-        <div>
-          <div class="brand">
-            <a href="/" class="back-link" title="返回首页">&larr;</a>
-            AI 科研绘图 - 编辑器
-          </div>
-          <div class="subtitle">
-            状态：<span id="statusText">等待中</span>
-          </div>
+    <nav class="navbar">
+      <div class="navbar-inner">
+        <div class="navbar-left">
+          <a href="/" class="nav-back" title="返回首页">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12.5 15L7.5 10L12.5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <a href="/" class="nav-brand">AutoFigure <span class="beta-tag">Beta</span></a>
         </div>
-        <div class="topbar-actions">
-          <button class="ghost danger-ghost" id="cancelBtn" style="display:none">取消任务</button>
-          <button class="ghost" id="logToggle">日志</button>
-          <div class="job-pill">任务 <span id="jobId"></span></div>
-        </div>
-      </header>
-
-      <div class="progress-bar" id="progressBar">
-        <div class="progress-fill" id="progressFill"></div>
-        <div class="progress-steps" id="progressSteps">
-          <span class="progress-step active" data-step="0">等待</span>
-          <span class="progress-step" data-step="1">生成图片</span>
-          <span class="progress-step" data-step="2">SAM3 分割</span>
-          <span class="progress-step" data-step="3">提取图标</span>
-          <span class="progress-step" data-step="4">生成模板</span>
-          <span class="progress-step" data-step="5">最终合成</span>
+        <div class="navbar-right">
+          <span class="status-chip" id="statusChip">
+            <span class="status-dot"></span>
+            <span id="statusText">等待中</span>
+          </span>
+          <span class="job-pill" id="jobId"></span>
+          <button class="btn-ghost" id="logToggle">日志</button>
+          <button class="btn-ghost btn-danger" id="cancelBtn" style="display:none">取消</button>
         </div>
       </div>
+    </nav>
 
-      <main class="canvas-stage">
-        <div class="canvas-shell">
-          <iframe
-            id="svgEditorFrame"
-            class="svg-frame"
-            title="SVG 编辑画布"
-          ></iframe>
-          <div id="svgFallback" class="svg-fallback">
-            <div class="fallback-title">SVG 编辑器未安装</div>
-            <div class="fallback-body">
-              请将 SVG-Edit 构建文件放入 <code>web/vendor/svg-edit/</code>（需包含 editor/index.html）以启用编辑功能。
-            </div>
-            <object id="fallbackObject" type="image/svg+xml" class="fallback-object"></object>
-          </div>
-          <div id="previewOverlay" class="preview-overlay">
-            <div class="preview-spinner"></div>
-            <div class="preview-step-label" id="previewStepLabel">正在生成图片...</div>
-            <img id="previewImage" class="preview-image" alt="中间产物预览" />
-          </div>
+    <main class="result-container">
+      <!-- 进度区域 -->
+      <section class="progress-section" id="progressSection">
+        <div class="progress-bar-wrap">
+          <div class="progress-bar-fill" id="progressFill"></div>
         </div>
-      </main>
+        <div class="progress-steps" id="progressSteps">
+          <div class="step-item active" data-step="0"><span class="step-num">1</span><span class="step-label">生成图片</span></div>
+          <div class="step-item" data-step="1"><span class="step-num">2</span><span class="step-label">SAM 分割</span></div>
+          <div class="step-item" data-step="2"><span class="step-num">3</span><span class="step-label">提取图标</span></div>
+          <div class="step-item" data-step="3"><span class="step-num">4</span><span class="step-label">生成模板</span></div>
+          <div class="step-item" data-step="4"><span class="step-num">5</span><span class="step-label">最终合成</span></div>
+        </div>
+        <div class="progress-status" id="progressStatus">正在生成图片...</div>
+      </section>
 
-      <button class="fab" id="artifactToggle" aria-label="产物面板">
-        <svg class="fab-icon" viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 2v10h14V7H5zm2 8l3-3 2 2 3-3 4 4H7z"
-            fill="#f2f2f2"
-          />
-        </svg>
-      </button>
+      <!-- 结果卡片：生成图片 -->
+      <section class="result-card" id="figureCard" style="display:none">
+        <div class="result-card-header">
+          <h2 class="result-card-title">生成图片</h2>
+          <a class="btn-download" id="figureDlBtn" download>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            下载 PNG
+          </a>
+        </div>
+        <div class="result-image-wrap">
+          <img id="figureImg" class="result-image" alt="生成的科研图" />
+        </div>
+      </section>
 
-      <aside class="artifact-panel" id="artifactPanel">
-        <div class="panel-header">产物</div>
-        <div class="artifact-list" id="artifactList"></div>
-      </aside>
+      <!-- 结果卡片：SVG 矢量图 -->
+      <section class="result-card" id="svgCard" style="display:none">
+        <div class="result-card-header">
+          <h2 class="result-card-title">SVG 矢量图</h2>
+          <button class="btn-download" id="downloadAllSvg">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2v8m0 0l-3-3m3 3l3-3M3 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            全部下载
+          </button>
+        </div>
+        <div class="svg-list" id="svgList"></div>
+        <div class="svg-tip">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><path d="M8 7v4M8 5.5v0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span>SVG 文件可使用 <strong>Figma</strong>、<strong>Inkscape</strong>、<strong>Adobe Illustrator</strong> 或 AI 工具进一步编辑</span>
+        </div>
+      </section>
 
-      <aside class="log-panel" id="logPanel">
-        <div class="panel-header">日志</div>
-        <div class="log-body" id="logBody"></div>
-      </aside>
-    </div>
+      <!-- 错误信息 -->
+      <section class="result-card result-error-card" id="errorCard" style="display:none">
+        <h2 class="result-card-title" style="color:#dc3545">生成失败</h2>
+        <p id="errorDetail" class="error-detail"></p>
+      </section>
 
-    <script src="/app.js?v=20260223"></script>
+      <!-- 底部操作 -->
+      <section class="result-footer" id="resultFooter" style="display:none">
+        <a href="/" class="btn-primary btn-lg">重新生成</a>
+        <p class="footer-hint">对结果不满意？试试调整方法描述或添加参考图片</p>
+      </section>
+    </main>
+
+    <!-- 日志面板 -->
+    <aside class="log-panel" id="logPanel">
+      <div class="panel-header">
+        <span>日志</span>
+        <button class="panel-close" id="logClose">&times;</button>
+      </div>
+      <div class="log-body" id="logBody"></div>
+    </aside>
+
+    <script src="/app.js?v=20260223b"></script>
   </body>
 </html>
