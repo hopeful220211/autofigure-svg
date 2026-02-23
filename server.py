@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import queue
@@ -59,9 +60,27 @@ class Job:
     last_stderr: str = ""
     started_at: float = field(default_factory=time.time)
     finished_at: float = 0.0
+    # 所有订阅此任务 SSE 的 asyncio.Queue 列表
+    _subscribers: list = field(default_factory=list)
+    _sub_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def push(self, event: str, data: dict) -> None:
-        self.queue.put({"event": event, "data": data})
+        msg = {"event": event, "data": data}
+        self.queue.put(msg)
+        # 同时推送给所有异步订阅者
+        with self._sub_lock:
+            for aq, loop in self._subscribers:
+                loop.call_soon_threadsafe(aq.put_nowait, msg)
+
+    def subscribe(self, loop: asyncio.AbstractEventLoop) -> asyncio.Queue:
+        aq = asyncio.Queue()
+        with self._sub_lock:
+            self._subscribers.append((aq, loop))
+        return aq
+
+    def unsubscribe(self, aq: asyncio.Queue) -> None:
+        with self._sub_lock:
+            self._subscribers = [(q, l) for q, l in self._subscribers if q is not aq]
 
     def write_log(self, stream: str, line: str) -> None:
         with self.log_lock:
@@ -256,29 +275,33 @@ def cancel_job(job_id: str) -> JSONResponse:
 
 
 @app.get("/api/events/{job_id}")
-def stream_events(job_id: str) -> StreamingResponse:
+async def stream_events(job_id: str) -> StreamingResponse:
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    def event_stream():
-        keepalive_counter = 0
-        while True:
-            try:
-                item = job.queue.get(timeout=1.0)
-            except queue.Empty:
-                if job.done:
-                    break
-                # 每 ~15 秒发送心跳，防止代理因空闲断开
-                keepalive_counter += 1
-                if keepalive_counter >= 15:
-                    keepalive_counter = 0
+    loop = asyncio.get_running_loop()
+    aq = job.subscribe(loop)
+
+    async def event_stream():
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(aq.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    if job.done:
+                        print(f"[SSE] job {job_id} done, closing stream")
+                        break
+                    # 心跳：每 10 秒发送，防止代理断连
                     yield ": keepalive\n\n"
-                continue
-            keepalive_counter = 0
-            if item.get("event") == "close":
-                break
-            yield _format_sse(item["event"], item["data"])
+                    continue
+                if item.get("event") == "close":
+                    print(f"[SSE] job {job_id} received close event")
+                    break
+                yield _format_sse(item["event"], item["data"])
+        finally:
+            job.unsubscribe(aq)
+            print(f"[SSE] job {job_id} stream ended, subscriber removed")
 
     return StreamingResponse(
         event_stream(),
@@ -376,6 +399,7 @@ def _format_sse(event: str, data: dict) -> str:
 
 
 def _monitor_job(job: Job) -> None:
+    print(f"[monitor] job {job.job_id} started, pushing 'started' event")
     job.push("status", {"state": "started"})
 
     stdout_thread = threading.Thread(
@@ -389,12 +413,17 @@ def _monitor_job(job: Job) -> None:
 
     idle_cycles = 0
     timed_out = False
+    scan_count = 0
     while True:
         _scan_artifacts(job)
+        scan_count += 1
+        if scan_count % 20 == 0:
+            print(f"[monitor] job {job.job_id} scan #{scan_count}, process alive={job.process.poll() is None}, seen={len(job.seen)} files")
 
         # 超时检查
         elapsed = time.time() - job.started_at
         if elapsed > JOB_TIMEOUT_SECONDS and job.process.poll() is None:
+            print(f"[monitor] job {job.job_id} timed out after {elapsed:.0f}s")
             job.process.terminate()
             try:
                 job.process.wait(timeout=5)
@@ -421,6 +450,7 @@ def _monitor_job(job: Job) -> None:
         if job.process.returncode and job.process.returncode != 0 and job.last_stderr:
             finished_data["error"] = job.last_stderr
 
+    print(f"[monitor] job {job.job_id} finished: code={finished_data.get('code')}, pushing finished event")
     job.push("status", finished_data)
     job.push(
         "artifact",
@@ -434,6 +464,7 @@ def _monitor_job(job: Job) -> None:
     job.finished_at = time.time()
     job.done = True
     job.push("close", {})
+    print(f"[monitor] job {job.job_id} close event pushed, done=True")
 
     # 清理过期任务，释放内存
     _cleanup_old_jobs()
@@ -486,6 +517,7 @@ def _scan_artifacts(job: Job) -> None:
         job.seen.add(rel_path)
 
         kind = _classify_artifact(rel_path)
+        print(f"[scan] job {job.job_id} found new artifact: {rel_path} (kind={kind})")
         job.push(
             "artifact",
             {
