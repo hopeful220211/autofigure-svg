@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -99,8 +100,8 @@ app.add_middleware(
 JOBS: dict[str, Job] = {}
 
 
+@app.exception_handler(RequestValidationError)
 @app.exception_handler(ValidationError)
-@app.exception_handler(422)
 async def validation_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=422,
@@ -125,6 +126,7 @@ def get_config() -> JSONResponse:
 @app.post("/api/run")
 def run_job(req: RunRequest) -> JSONResponse:
     try:
+        print(f"[api/run] method_text={req.method_text[:80]!r} optimize_iterations={req.optimize_iterations} ref={req.reference_image_path}")
         job_id = datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8]
         output_dir = OUTPUTS_DIR / job_id
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -214,10 +216,12 @@ def run_job(req: RunRequest) -> JSONResponse:
         monitor_thread.start()
 
         return JSONResponse({"job_id": job_id})
-    except Exception:
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JSONResponse(
             status_code=500,
-            content={"error": "启动任务失败，请检查服务器配置或稍后重试。"},
+            content={"error": f"启动任务失败：{e}"},
         )
 
 

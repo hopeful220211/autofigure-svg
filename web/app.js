@@ -33,6 +33,10 @@
     const referenceStatus = $("referenceStatus");
 
     if (uploadZone && referenceFile) {
+      // 阻止 input 的 click 冒泡到 uploadZone，防止弹两次文件选择框
+      referenceFile.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
       uploadZone.addEventListener("click", () => referenceFile.click());
       uploadZone.addEventListener("dragover", (event) => {
         event.preventDefault();
