@@ -973,6 +973,7 @@ def _extract_roboflow_detections(response_json: dict, image_size: tuple[int, int
                         "x2": xyxy[2],
                         "y2": xyxy[3],
                         "score": confidence,
+                        "polygon": points,
                     }
                 )
 
@@ -1184,11 +1185,14 @@ def segment_with_sam3(
                 score_val = float(score) if score is not None else 0.0
                 if score_val >= min_score:
                     x1, y1, x2, y2 = det["x1"], det["y1"], det["x2"], det["y2"]
-                    all_detected_boxes.append({
+                    box_entry = {
                         "x1": x1, "y1": y1, "x2": x2, "y2": y2,
                         "score": score_val,
-                        "prompt": prompt
-                    })
+                        "prompt": prompt,
+                    }
+                    if det.get("polygon"):
+                        box_entry["polygon"] = det["polygon"]
+                    all_detected_boxes.append(box_entry)
                     prompt_count += 1
                     print(f"    对象 {prompt_count}: ({x1}, {y1}, {x2}, {y2}), score={score_val:.3f}")
                 else:
@@ -1204,7 +1208,7 @@ def segment_with_sam3(
     # 为所有检测到的 boxes 分配临时 id 和 label（用于合并）
     valid_boxes = []
     for i, box_data in enumerate(all_detected_boxes):
-        valid_boxes.append({
+        entry = {
             "id": i,
             "label": f"<AF>{i + 1:02d}",
             "x1": box_data["x1"],
@@ -1212,8 +1216,11 @@ def segment_with_sam3(
             "x2": box_data["x2"],
             "y2": box_data["y2"],
             "score": box_data["score"],
-            "prompt": box_data["prompt"]
-        })
+            "prompt": box_data["prompt"],
+        }
+        if box_data.get("polygon"):
+            entry["polygon"] = box_data["polygon"]
+        valid_boxes.append(entry)
 
     # === 新增：合并重叠的boxes ===
     if merge_threshold > 0 and len(valid_boxes) > 1:
@@ -1339,12 +1346,36 @@ def crop_and_remove_background(
 
         x1, y1, x2, y2 = box_info["x1"], box_info["y1"], box_info["x2"], box_info["y2"]
 
-        cropped = image.crop((x1, y1, x2, y2))
+        polygon = box_info.get("polygon")
         crop_path = icons_dir / f"icon_{label_clean}.png"
-        cropped.save(crop_path)
-
         nobg_path = icons_dir / f"icon_{label_clean}_nobg.png"
-        _rembg_remove_background(cropped, nobg_path)
+
+        if polygon and len(polygon) >= 3:
+            # Polygon mask 裁剪：精确边界，跳过 rembg
+            from PIL import ImageDraw
+            mask = Image.new("L", image.size, 0)
+            draw = ImageDraw.Draw(mask)
+            poly_tuples = [(float(pt[0]), float(pt[1])) for pt in polygon]
+            draw.polygon(poly_tuples, fill=255)
+
+            rgba = image.convert("RGBA")
+            # 将 polygon mask 应用为 alpha 通道
+            r, g, b, a = rgba.split()
+            a = Image.composite(a, Image.new("L", image.size, 0), mask)
+            rgba.putalpha(a)
+
+            # 裁剪到 bbox 区域
+            cropped = rgba.crop((x1, y1, x2, y2))
+            crop_path_saved = crop_path  # 保存原始裁切（不含 mask）
+            image.crop((x1, y1, x2, y2)).save(crop_path_saved)
+            cropped.save(nobg_path)
+            print(f"  {label}: polygon mask 裁切完成（跳过 rembg）-> {nobg_path}")
+        else:
+            # 无 polygon：保留原有 bbox + rembg 流程
+            cropped = image.crop((x1, y1, x2, y2))
+            cropped.save(crop_path)
+            _rembg_remove_background(cropped, nobg_path)
+            print(f"  {label}: 裁切并 rembg 去背景完成 -> {nobg_path}")
 
         icon_infos.append({
             "id": box_id,
@@ -1355,8 +1386,6 @@ def crop_and_remove_background(
             "crop_path": str(crop_path),
             "nobg_path": str(nobg_path),
         })
-
-        print(f"  {label}: 裁切并去背景完成 -> {nobg_path}")
 
     return icon_infos
 
@@ -1425,7 +1454,8 @@ Do NOT create any gray rectangle placeholders. Draw everything as normal SVG ele
 """
 
     # 基础 prompt
-    base_prompt = f"""Create an SVG that reproduces this scientific figure as closely as possible.
+    base_prompt = f"""编写SVG代码来实现像素级别的复现这张图片（除了图标用相同大小的矩形占位符填充之外，
+其他文字和组件(尤其是箭头样式)都要保持一致（即灰色矩形覆盖的内容就是图标））。
 
 CRITICAL DIMENSION REQUIREMENT:
 - The original image has dimensions: {figure_width} x {figure_height} pixels
@@ -1434,11 +1464,12 @@ CRITICAL DIMENSION REQUIREMENT:
   - Set width="{figure_width}" height="{figure_height}"
 - DO NOT scale or resize the SVG
 
-IMPORTANT: The final SVG will have the original figure.png embedded as a background image.
-Your SVG elements will be overlaid on top. So you should focus on:
-1. Creating placeholders ONLY for SAM-detected elements (see below)
-2. Adding editable text labels, arrows, and annotations as SVG vector elements
-3. Do NOT try to recreate backgrounds, gradients, or complex shapes that are already in the original image
+IMPORTANT RULES:
+- 所有文字标签必须使用 SVG `<text>` 元素，不可嵌入为图片
+- 背景区域用 `<rect>`, `<circle>`, `<path>` 等纯矢量绘制，使用科研图常用配色
+- 未被 SAM 检测的图形元素用带颜色的矢量图形（圆角矩形+标签）表示，不要用灰色空方块
+- 每个元素（文字、箭头、连线）应是独立 SVG 元素，方便用户在编辑器中选中移动
+- 整个 SVG 必须是纯矢量的，不要嵌入任何位图/PNG 背景
 {detected_elements_desc}"""
 
     if placeholder_mode == "box":
@@ -1744,10 +1775,9 @@ def replace_icons_in_svg(
     output_path: str,
     scale_factors: tuple[float, float] = (1.0, 1.0),
     match_by_label: bool = True,
-    figure_path: str = None,
 ) -> str:
     """
-    将透明背景图标替换到 SVG 中的占位符，并嵌入原图为背景
+    将透明背景图标替换到 SVG 中的占位符
 
     Args:
         template_svg_path: SVG 模板路径
@@ -1755,7 +1785,6 @@ def replace_icons_in_svg(
         output_path: 输出路径
         scale_factors: 坐标缩放因子
         match_by_label: 是否使用序号匹配（label 模式）
-        figure_path: 原始 figure.png 路径（用于嵌入为背景）
     """
     print("\n" + "=" * 60)
     print("步骤五：图标替换到 SVG")
@@ -1768,27 +1797,6 @@ def replace_icons_in_svg(
 
     with open(template_svg_path, 'r', encoding='utf-8') as f:
         svg_content = f.read()
-
-    # === 第 1 层：嵌入原图作为背景 ===
-    if figure_path and Path(figure_path).is_file():
-        print(f"嵌入原图作为背景: {figure_path}")
-        figure_img = Image.open(figure_path)
-        fig_width, fig_height = figure_img.size
-        fig_buf = io.BytesIO()
-        figure_img.save(fig_buf, format="PNG")
-        fig_b64 = base64.b64encode(fig_buf.getvalue()).decode("utf-8")
-        bg_image_tag = f'<image id="background" x="0" y="0" width="{fig_width}" height="{fig_height}" href="data:image/png;base64,{fig_b64}" preserveAspectRatio="xMidYMid meet"/>'
-
-        # 在 <svg> 开标签后插入背景图
-        svg_open_match = re.search(r'(<svg[^>]*>)', svg_content, re.IGNORECASE)
-        if svg_open_match:
-            insert_pos = svg_open_match.end()
-            svg_content = svg_content[:insert_pos] + f'\n  <!-- Layer 1: Original figure as background -->\n  {bg_image_tag}\n  <!-- Layer 2+3: Editable elements -->\n' + svg_content[insert_pos:]
-            print(f"  背景图嵌入成功 ({fig_width}x{fig_height}, {len(fig_b64)//1024}KB base64)")
-        else:
-            print("  警告: 无法找到 <svg> 开标签，跳过背景嵌入")
-    else:
-        print("  警告: 未提供 figure_path 或文件不存在，跳过背景嵌入")
 
     for icon_info in icon_infos:
         label = icon_info.get("label", "")
@@ -2505,7 +2513,6 @@ def method_to_svg(
         output_path=str(final_svg_path),
         scale_factors=scale_factors,
         match_by_label=(placeholder_mode == "label"),
-        figure_path=str(figure_path),
     )
 
     print("\n" + "=" * 60)
