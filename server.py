@@ -21,7 +21,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
@@ -312,6 +312,19 @@ async def stream_events(job_id: str) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/logs/{job_id}")
+def get_logs(job_id: str) -> PlainTextResponse:
+    """返回任务的日志文件内容（纯文本）"""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    try:
+        content = job.log_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        content = ""
+    return PlainTextResponse(content)
 
 
 @app.get("/api/artifacts-list/{job_id}")

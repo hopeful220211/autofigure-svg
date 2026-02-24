@@ -266,7 +266,10 @@
     jobIdEl.textContent = jobId;
 
     // Log panel toggles
-    logToggle.addEventListener("click", () => logPanel.classList.toggle("open"));
+    logToggle.addEventListener("click", () => {
+      logPanel.classList.toggle("open");
+      if (logPanel.classList.contains("open")) fetchLogs();
+    });
     if (logClose) logClose.addEventListener("click", () => logPanel.classList.remove("open"));
 
     // Cancel
@@ -359,6 +362,8 @@
           isFinished = true;
           es.close();
           cancelBtn.style.display = "none";
+          stopLogPolling();
+          fetchLogs(); // 最后拉取一次完整日志
           if (typeof data.code === "number" && data.code !== 0) {
             statusText.textContent = "生成失败";
             statusChip.classList.add("error");
@@ -379,8 +384,7 @@
 
       es.addEventListener("log", (event) => {
         sseRetryCount = 0;
-        const data = JSON.parse(event.data);
-        appendLogLine(logBody, data);
+        // 日志通过 HTTP 轮询获取，SSE log 事件仅用于重置重试计数
       });
 
       es.onerror = () => {
@@ -393,6 +397,8 @@
         } else {
           statusText.textContent = "连接已断开";
           cancelBtn.style.display = "none";
+          stopLogPolling();
+          fetchLogs();
           fetchArtifactList();
         }
       };
@@ -451,6 +457,38 @@
         });
       });
     }
+
+    // 通过 HTTP 获取日志内容（不依赖 SSE）
+    let logPollTimer = null;
+    async function fetchLogs() {
+      try {
+        const res = await fetch(`/api/logs/${jobId}`);
+        if (!res.ok) return;
+        const text = await res.text();
+        if (text) {
+          logBody.textContent = text;
+          logBody.scrollTop = logBody.scrollHeight;
+        }
+      } catch (_) {}
+    }
+
+    // 定期拉取日志（每 3 秒）
+    function startLogPolling() {
+      if (logPollTimer) return;
+      logPollTimer = setInterval(() => {
+        fetchLogs();
+      }, 3000);
+    }
+
+    function stopLogPolling() {
+      if (logPollTimer) {
+        clearInterval(logPollTimer);
+        logPollTimer = null;
+      }
+    }
+
+    // 页面加载后开始轮询日志
+    startLogPolling();
 
     async function fetchArtifactList() {
       try {
