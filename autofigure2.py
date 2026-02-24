@@ -1375,6 +1375,7 @@ def generate_svg_template(
     base_url: str,
     provider: ProviderType,
     placeholder_mode: PlaceholderMode = "label",
+    icon_infos: list[dict] = None,
 ) -> str:
     """
     使用多模态 LLM 生成 SVG 代码
@@ -1384,6 +1385,7 @@ def generate_svg_template(
             - "none": 无特殊样式
             - "box": 传入 boxlib 坐标
             - "label": 灰色填充+黑色边框+序号标签（推荐）
+        icon_infos: SAM 实际检测到的图标信息列表（用于限制 LLM 只为这些元素创建占位符）
     """
     print("\n" + "=" * 60)
     print("步骤四：多模态调用生成 SVG")
@@ -1398,39 +1400,65 @@ def generate_svg_template(
     figure_width, figure_height = figure_img.size
     print(f"原图尺寸: {figure_width} x {figure_height}")
 
+    # 构建 SAM 检测到的元素列表描述
+    detected_elements_desc = ""
+    if icon_infos:
+        detected_labels = [info.get("label", f"<AF>{i+1:02d}") for i, info in enumerate(icon_infos)]
+        print(f"SAM 检测到的元素: {detected_labels}")
+        elements_list = "\n".join([
+            f"  - {info.get('label', f'<AF>{i+1:02d}')}: position ({info['x1']}, {info['y1']}) size {info.get('width', info['x2']-info['x1'])}x{info.get('height', info['y2']-info['y1'])}"
+            for i, info in enumerate(icon_infos)
+        ])
+        detected_elements_desc = f"""
+IMPORTANT - DETECTED ELEMENTS (SAM):
+The following elements were detected by SAM and will be replaced with actual icons later.
+You MUST create placeholders ONLY for these elements. Do NOT create placeholders for any other elements.
+All other visual elements (text, arrows, backgrounds, shapes, etc.) should be drawn as normal SVG vector elements.
+
+Detected elements:
+{elements_list}
+"""
+    else:
+        detected_elements_desc = """
+NOTE: No elements were detected by SAM. Generate the SVG as a full vector reproduction of the image.
+Do NOT create any gray rectangle placeholders. Draw everything as normal SVG elements.
+"""
+
     # 基础 prompt
-    base_prompt = f"""编写svg代码来实现像素级别的复现这张图片（除了图标用相同大小的矩形占位符填充之外其他文字和组件(尤其是箭头样式)都要保持一致（即灰色矩形覆盖的内容就是图标））
+    base_prompt = f"""Create an SVG that reproduces this scientific figure as closely as possible.
 
 CRITICAL DIMENSION REQUIREMENT:
 - The original image has dimensions: {figure_width} x {figure_height} pixels
-- Your SVG MUST use these EXACT dimensions to ensure accurate icon placement:
+- Your SVG MUST use these EXACT dimensions:
   - Set viewBox="0 0 {figure_width} {figure_height}"
   - Set width="{figure_width}" height="{figure_height}"
 - DO NOT scale or resize the SVG
-"""
+
+IMPORTANT: The final SVG will have the original figure.png embedded as a background image.
+Your SVG elements will be overlaid on top. So you should focus on:
+1. Creating placeholders ONLY for SAM-detected elements (see below)
+2. Adding editable text labels, arrows, and annotations as SVG vector elements
+3. Do NOT try to recreate backgrounds, gradients, or complex shapes that are already in the original image
+{detected_elements_desc}"""
 
     if placeholder_mode == "box":
-        # box 模式：传入 boxlib 坐标
         with open(boxlib_path, 'r', encoding='utf-8') as f:
             boxlib_content = f.read()
 
         prompt_text = base_prompt + f"""
 ICON COORDINATES FROM boxlib.json:
-The following JSON contains precise icon coordinates detected by SAM3:
 {boxlib_content}
-Use these coordinates to accurately position your icon placeholders in the SVG.
+Use these coordinates to position your icon placeholders.
 
 Please output ONLY the SVG code, starting with <svg and ending with </svg>. Do not include any explanation or markdown formatting."""
 
     elif placeholder_mode == "label":
-        # label 模式：要求占位符样式与 samed.png 一致
         prompt_text = base_prompt + """
 PLACEHOLDER STYLE REQUIREMENT:
-Look at the second image (samed.png) - each icon area is marked with a gray rectangle (#808080), black border, and a centered label like <AF>01, <AF>02, etc.
-
-Your SVG placeholders MUST match this exact style:
+Look at the second image (samed.png) - it shows which elements were detected.
+Create placeholders ONLY for the detected elements with this exact style:
 - Rectangle with fill="#808080" and stroke="black" stroke-width="2"
-- Centered white text showing the same label (<AF>01, <AF>02, etc.)
+- Centered white text showing the label (<AF>01, <AF>02, etc.)
 - Wrap each placeholder in a <g> element with id matching the label (e.g., id="AF01")
 
 Example placeholder structure:
@@ -1439,9 +1467,11 @@ Example placeholder structure:
   <text x="140" y="90" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="14">&lt;AF&gt;01</text>
 </g>
 
+Do NOT create placeholders for elements that are NOT in the detected list above.
+
 Please output ONLY the SVG code, starting with <svg and ending with </svg>. Do not include any explanation or markdown formatting."""
 
-    else:  # none 模式
+    else:
         prompt_text = base_prompt + """
 Please output ONLY the SVG code, starting with <svg and ending with </svg>. Do not include any explanation or markdown formatting."""
 
@@ -1714,9 +1744,10 @@ def replace_icons_in_svg(
     output_path: str,
     scale_factors: tuple[float, float] = (1.0, 1.0),
     match_by_label: bool = True,
+    figure_path: str = None,
 ) -> str:
     """
-    将透明背景图标替换到 SVG 中的占位符
+    将透明背景图标替换到 SVG 中的占位符，并嵌入原图为背景
 
     Args:
         template_svg_path: SVG 模板路径
@@ -1724,6 +1755,7 @@ def replace_icons_in_svg(
         output_path: 输出路径
         scale_factors: 坐标缩放因子
         match_by_label: 是否使用序号匹配（label 模式）
+        figure_path: 原始 figure.png 路径（用于嵌入为背景）
     """
     print("\n" + "=" * 60)
     print("步骤五：图标替换到 SVG")
@@ -1736,6 +1768,27 @@ def replace_icons_in_svg(
 
     with open(template_svg_path, 'r', encoding='utf-8') as f:
         svg_content = f.read()
+
+    # === 第 1 层：嵌入原图作为背景 ===
+    if figure_path and Path(figure_path).is_file():
+        print(f"嵌入原图作为背景: {figure_path}")
+        figure_img = Image.open(figure_path)
+        fig_width, fig_height = figure_img.size
+        fig_buf = io.BytesIO()
+        figure_img.save(fig_buf, format="PNG")
+        fig_b64 = base64.b64encode(fig_buf.getvalue()).decode("utf-8")
+        bg_image_tag = f'<image id="background" x="0" y="0" width="{fig_width}" height="{fig_height}" href="data:image/png;base64,{fig_b64}" preserveAspectRatio="xMidYMid meet"/>'
+
+        # 在 <svg> 开标签后插入背景图
+        svg_open_match = re.search(r'(<svg[^>]*>)', svg_content, re.IGNORECASE)
+        if svg_open_match:
+            insert_pos = svg_open_match.end()
+            svg_content = svg_content[:insert_pos] + f'\n  <!-- Layer 1: Original figure as background -->\n  {bg_image_tag}\n  <!-- Layer 2+3: Editable elements -->\n' + svg_content[insert_pos:]
+            print(f"  背景图嵌入成功 ({fig_width}x{fig_height}, {len(fig_b64)//1024}KB base64)")
+        else:
+            print("  警告: 无法找到 <svg> 开标签，跳过背景嵌入")
+    else:
+        print("  警告: 未提供 figure_path 或文件不存在，跳过背景嵌入")
 
     for icon_info in icon_infos:
         label = icon_info.get("label", "")
@@ -2382,6 +2435,7 @@ def method_to_svg(
         base_url=base_url,
         provider=provider,
         placeholder_mode=placeholder_mode,
+        icon_infos=icon_infos,
     )
 
     # 步骤 4.6：LLM 优化 SVG 模板（可配置迭代次数，0 表示跳过）
@@ -2443,7 +2497,7 @@ def method_to_svg(
         print("警告: 无法提取 SVG 尺寸，使用 1:1 坐标映射")
         scale_factors = (1.0, 1.0)
 
-    # 步骤五：图标替换
+    # 步骤五：图标替换 + 背景嵌入
     final_svg_path = output_dir / "final.svg"
     replace_icons_in_svg(
         template_svg_path=str(optimized_template_path),
@@ -2451,6 +2505,7 @@ def method_to_svg(
         output_path=str(final_svg_path),
         scale_factors=scale_factors,
         match_by_label=(placeholder_mode == "label"),
+        figure_path=str(figure_path),
     )
 
     print("\n" + "=" * 60)
