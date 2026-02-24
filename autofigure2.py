@@ -2307,7 +2307,22 @@ def method_to_svg(
     )
 
     if len(valid_boxes) == 0:
-        print("\n警告: 没有检测到有效的图标，流程终止")
+        # 兜底重试：用更泛化的 prompts 再试一次
+        fallback_prompts = "object,element,block,region,component,part,area,item"
+        print(f"\n警告: 第一轮 SAM 检测到 0 个对象，使用备选 prompts 重试: {fallback_prompts}")
+        samed_path, boxlib_path, valid_boxes = segment_with_sam3(
+            image_path=str(figure_path),
+            output_dir=str(output_dir),
+            text_prompts=fallback_prompts,
+            min_score=min_score,
+            merge_threshold=merge_threshold,
+            sam_backend=sam_backend_value,
+            sam_api_key=sam_api_key,
+            sam_max_masks=sam_max_masks,
+        )
+
+    if len(valid_boxes) == 0:
+        print("\n警告: 两轮 SAM 检测均未找到有效图标，流程终止")
         return {
             "figure_path": str(figure_path),
             "samed_path": samed_path,
@@ -2502,7 +2517,7 @@ if __name__ == "__main__":
     parser.add_argument("--reference_image_path", default=None, help="参考图片路径（可选）")
 
     # SAM3 参数
-    parser.add_argument("--sam_prompt", default="icon,robot,animal,person", help="SAM3 文本提示，支持逗号分隔多个prompt（如 'icon,diagram,arrow'，默认: icon）")
+    parser.add_argument("--sam_prompt", default="icon,symbol,shape,object,arrow,text,diagram,circle,box", help="SAM3 文本提示，支持逗号分隔多个prompt（如 'icon,diagram,arrow'）")
     parser.add_argument("--min_score", type=float, default=0.0, help="SAM3 最低置信度阈值（默认: 0.0）")
     parser.add_argument(
         "--sam_backend",

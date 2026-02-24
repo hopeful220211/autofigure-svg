@@ -40,7 +40,41 @@ API_KEY = os.environ.get("API_KEY", "")
 SAM_API_KEY = os.environ.get("ROBOFLOW_API_KEY") or os.environ.get("FAL_KEY") or ""
 DEFAULT_PROVIDER = os.environ.get("AUTOFIGURE_PROVIDER", "openrouter")
 DEFAULT_SAM_BACKEND = "roboflow"
-DEFAULT_SAM_PROMPT = "icon,person,animal,robot"
+DEFAULT_SAM_PROMPT = "icon,symbol,shape,object,arrow,text,diagram,circle,box"
+
+# 从方法文本中提取潜在的 SAM prompt 关键词
+# 这些是科研图中常见的视觉元素类别词
+_SAM_KEYWORD_CANDIDATES = {
+    # 生物学
+    "cell", "protein", "receptor", "molecule", "enzyme", "antibody",
+    "membrane", "mitochondria", "nucleus", "ribosome", "vesicle",
+    "chromosome", "dna", "rna", "gene", "bacteria", "virus",
+    "macrophage", "neutrophil", "lymphocyte", "neuron", "synapse",
+    "organ", "tissue", "blood", "tumor", "cancer",
+    # 化学/结构
+    "structure", "complex", "pathway", "channel", "pump",
+    # 图形元素
+    "arrow", "circle", "rectangle", "triangle", "star", "line",
+    "label", "node", "edge", "block", "flow",
+}
+
+def _extract_sam_keywords(method_text: str) -> list[str]:
+    """从方法文本中提取可能的图形元素关键词作为额外 SAM prompts"""
+    words = set(re.findall(r'[a-zA-Z]{3,}', method_text.lower()))
+    extra = [w for w in words if w in _SAM_KEYWORD_CANDIDATES]
+    return extra
+
+
+def _build_sam_prompt(method_text: str) -> str:
+    """构建 SAM prompt：默认词 + 从方法文本提取的关键词"""
+    base = set(DEFAULT_SAM_PROMPT.split(","))
+    extra = _extract_sam_keywords(method_text)
+    all_prompts = list(base | set(extra))
+    result = ",".join(all_prompts)
+    if extra:
+        print(f"[sam] 从文本中提取了额外关键词: {extra}")
+    print(f"[sam] 最终 SAM prompts: {result}")
+    return result
 DEFAULT_PLACEHOLDER_MODE = "label"
 DEFAULT_MERGE_THRESHOLD = 0.01
 JOB_TIMEOUT_SECONDS = 600  # 10 分钟超时
@@ -161,7 +195,7 @@ def run_job(req: RunRequest) -> JSONResponse:
             "--sam_backend",
             DEFAULT_SAM_BACKEND,
             "--sam_prompt",
-            DEFAULT_SAM_PROMPT,
+            _build_sam_prompt(method_text),
             "--placeholder_mode",
             DEFAULT_PLACEHOLDER_MODE,
             "--merge_threshold",
