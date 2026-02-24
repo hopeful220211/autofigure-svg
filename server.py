@@ -285,6 +285,26 @@ async def stream_events(job_id: str) -> StreamingResponse:
 
     async def event_stream():
         try:
+            # 如果任务已经完成，重放产物和完成事件
+            if job.done:
+                print(f"[SSE] job {job_id} already done, replaying events")
+                # 重放已发现的 artifact 事件
+                for rel_path in job.seen:
+                    kind = _classify_artifact(rel_path)
+                    name = Path(rel_path).name
+                    yield _format_sse("artifact", {
+                        "kind": kind,
+                        "name": name,
+                        "path": rel_path,
+                        "url": f"/api/artifacts/{job.job_id}/{rel_path}",
+                    })
+                # 重放 finished 状态
+                finished_data: dict = {"state": "finished", "code": job.process.returncode}
+                if job.process.returncode and job.process.returncode != 0 and job.last_stderr:
+                    finished_data["error"] = job.last_stderr
+                yield _format_sse("status", finished_data)
+                return
+
             while True:
                 try:
                     item = await asyncio.wait_for(aq.get(), timeout=10.0)
