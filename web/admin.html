@@ -221,8 +221,8 @@
 
     function showPanel() {
       $("loginView").style.display = "none";
-      $("panelView").style.display = "";
-      $("logoutBtn").style.display = "";
+      $("panelView").style.display = "block";
+      $("logoutBtn").style.display = "inline-block";
       loadStats();
       loadCodes();
     }
@@ -230,7 +230,7 @@
     window.logout = function () {
       token = "";
       sessionStorage.removeItem("admin_token");
-      $("loginView").style.display = "";
+      $("loginView").style.display = "flex";
       $("panelView").style.display = "none";
       $("logoutBtn").style.display = "none";
     };
