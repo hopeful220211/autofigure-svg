@@ -947,7 +947,7 @@ def admin_stats(request: Request) -> JSONResponse:
 
 @app.get("/admin")
 def admin_page() -> FileResponse:
-    return FileResponse(str(WEB_DIR / "admin.html"))
+    return FileResponse(str(WEB_DIR / "admin.html"), media_type="text/html")
 
 
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="static")

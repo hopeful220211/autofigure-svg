@@ -18,77 +18,8 @@
     return text;
   }
 
-  /* ========== Invite Code Logic ========== */
-  function initInviteOverlay() {
-    const overlay = $("invite-overlay");
-    const input = $("inviteCodeInput");
-    const verifyBtn = $("inviteVerifyBtn");
-    const errorEl = $("inviteError");
-    const infoEl = $("inviteInfo");
-    if (!overlay) return;
-
-    async function verifyCode(code, silent) {
-      try {
-        const res = await fetch("/api/verify-code", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          if (!silent) errorEl.textContent = data.error || "验证失败";
-          return false;
-        }
-        if (infoEl && !silent) {
-          infoEl.textContent = `今日剩余 ${data.remaining}/${data.daily_limit} 次`;
-        }
-        return data;
-      } catch (e) {
-        if (!silent) errorEl.textContent = "网络错误，请重试";
-        return false;
-      }
-    }
-
-    // 页面加载：检查 localStorage
-    const saved = localStorage.getItem("invite_code");
-    if (saved) {
-      verifyCode(saved, true).then((result) => {
-        if (result) {
-          overlay.style.display = "none";
-        } else {
-          localStorage.removeItem("invite_code");
-          overlay.style.display = "";
-        }
-      });
-    } else {
-      overlay.style.display = "";
-    }
-
-    verifyBtn.addEventListener("click", async () => {
-      errorEl.textContent = "";
-      infoEl.textContent = "";
-      const code = input.value.trim();
-      if (!code) { errorEl.textContent = "请输入邀请码"; return; }
-      verifyBtn.disabled = true;
-      verifyBtn.textContent = "验证中...";
-      const result = await verifyCode(code, false);
-      verifyBtn.disabled = false;
-      verifyBtn.textContent = "验证";
-      if (result) {
-        localStorage.setItem("invite_code", code);
-        overlay.style.display = "none";
-      }
-    });
-
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") verifyBtn.click();
-    });
-  }
-
   /* ========== Input Page ========== */
   function initInputPage() {
-    initInviteOverlay();
-
     const confirmBtn = $("confirmBtn");
     const errorMsg = $("errorMsg");
     const uploadZone = $("uploadZone");
@@ -100,6 +31,16 @@
     const uploadRemove = $("uploadRemove");
     const methodText = $("methodText");
     const chineseHint = $("chineseHint");
+    const inviteCodeInput = $("inviteCodeInput");
+    const inviteStatus = $("inviteStatus");
+
+    // 邀请码：从 localStorage 恢复
+    const savedCode = localStorage.getItem("invite_code");
+    if (savedCode && inviteCodeInput) {
+      inviteCodeInput.value = savedCode;
+      inviteStatus.textContent = "已保存的邀请码";
+      inviteStatus.style.color = "#10b981";
+    }
 
     // 中文检测
     if (methodText && chineseHint) {
@@ -168,10 +109,10 @@
       }
 
       // 检查邀请码
-      const inviteCode = localStorage.getItem("invite_code");
+      const inviteCode = inviteCodeInput ? inviteCodeInput.value.trim() : "";
       if (!inviteCode) {
-        const overlay = $("invite-overlay");
-        if (overlay) overlay.style.display = "";
+        errorMsg.textContent = "请输入邀请码";
+        if (inviteCodeInput) inviteCodeInput.focus();
         return;
       }
 
@@ -205,17 +146,18 @@
         if (!response.ok) {
           const t = await response.text();
           if (response.status === 403) {
-            // 邀请码问题，清除并弹出遮罩
+            // 邀请码问题，清除缓存
             localStorage.removeItem("invite_code");
-            const overlay = $("invite-overlay");
-            const inviteError = $("inviteError");
-            if (overlay) overlay.style.display = "";
-            if (inviteError) inviteError.textContent = parseErrorMessage(t);
+            if (inviteStatus) { inviteStatus.textContent = parseErrorMessage(t); inviteStatus.style.color = "#dc3545"; }
+            if (inviteCodeInput) inviteCodeInput.focus();
           }
           throw new Error(parseErrorMessage(t || "请求失败"));
         }
         const data = await response.json();
         jobId = data.job_id;
+        // 成功后保存邀请码到 localStorage
+        localStorage.setItem("invite_code", inviteCode);
+        if (inviteStatus) { inviteStatus.textContent = "邀请码有效"; inviteStatus.style.color = "#10b981"; }
       } catch (err) {
         errorMsg.textContent = err.message || "启动任务失败";
         confirmBtn.disabled = false;
