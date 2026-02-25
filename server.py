@@ -5,16 +5,19 @@ import json
 import os
 import queue
 import re
+import secrets
 import shutil
 import signal
 import socket
+import sqlite3
+import string
 import subprocess
 import threading
 import time
 import uuid
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
 
@@ -80,6 +83,60 @@ DEFAULT_MERGE_THRESHOLD = 0.01
 JOB_TIMEOUT_SECONDS = 600  # 10 分钟超时
 JOB_RETENTION_SECONDS = 3600  # 已完成任务保留 1 小时
 
+# === 邀请码系统 ===
+DB_PATH = os.path.join(os.environ.get("DATA_DIR", "."), "invites.db")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "ccccckd011122")
+ADMIN_TOKENS: set[str] = set()
+
+
+def init_db() -> None:
+    db = sqlite3.connect(DB_PATH)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS invite_codes (
+            code TEXT PRIMARY KEY,
+            code_type TEXT NOT NULL DEFAULT 'T',
+            daily_limit INTEGER NOT NULL DEFAULT 5,
+            used_today INTEGER NOT NULL DEFAULT 0,
+            total_used INTEGER NOT NULL DEFAULT 0,
+            last_used_date TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            note TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            expires_at TEXT
+        )
+    """)
+    db.commit()
+    db.close()
+
+
+def _get_db() -> sqlite3.Connection:
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    return db
+
+
+def _generate_code(code_type: str = "T") -> str:
+    prefix = "P-" if code_type == "P" else "T-"
+    chars = string.ascii_uppercase + string.digits
+    suffix = "".join(secrets.choice(chars) for _ in range(8))
+    return prefix + suffix
+
+
+def _check_and_reset_daily(db: sqlite3.Connection, code_row: sqlite3.Row) -> dict:
+    """检查并重置每日使用次数，返回更新后的字典"""
+    today = date.today().isoformat()
+    data = dict(code_row)
+    if data["last_used_date"] != today:
+        db.execute("UPDATE invite_codes SET used_today = 0, last_used_date = ? WHERE code = ?",
+                   (today, data["code"]))
+        db.commit()
+        data["used_today"] = 0
+        data["last_used_date"] = today
+    return data
+
+
+init_db()
+
 
 @dataclass
 class Job:
@@ -126,6 +183,7 @@ class RunRequest(BaseModel):
     method_text: str = Field(..., min_length=1)
     optimize_iterations: Optional[int] = None
     reference_image_path: Optional[str] = None
+    invite_code: Optional[str] = None
 
 
 app = FastAPI()
@@ -159,8 +217,59 @@ async def internal_error_handler(request: Request, exc: Exception):
 
 
 
+class VerifyCodeRequest(BaseModel):
+    code: str
+
+
+@app.post("/api/verify-code")
+def verify_code(req: VerifyCodeRequest) -> JSONResponse:
+    db = _get_db()
+    row = db.execute("SELECT * FROM invite_codes WHERE code = ?", (req.code,)).fetchone()
+    if not row:
+        db.close()
+        return JSONResponse(status_code=404, content={"error": "邀请码不存在"})
+    data = _check_and_reset_daily(db, row)
+    db.close()
+    if not data["is_active"]:
+        return JSONResponse(status_code=403, content={"error": "邀请码已被禁用"})
+    if data["expires_at"] and data["expires_at"] < date.today().isoformat():
+        return JSONResponse(status_code=403, content={"error": "邀请码已过期"})
+    remaining = data["daily_limit"] - data["used_today"]
+    return JSONResponse({
+        "valid": True,
+        "code_type": data["code_type"],
+        "daily_limit": data["daily_limit"],
+        "used_today": data["used_today"],
+        "remaining": remaining,
+    })
+
+
 @app.post("/api/run")
 def run_job(req: RunRequest) -> JSONResponse:
+    # 邀请码验证 + 扣次数
+    if not req.invite_code:
+        return JSONResponse(status_code=403, content={"error": "请输入邀请码后再生成"})
+    db = _get_db()
+    row = db.execute("SELECT * FROM invite_codes WHERE code = ?", (req.invite_code,)).fetchone()
+    if not row:
+        db.close()
+        return JSONResponse(status_code=403, content={"error": "邀请码无效"})
+    code_data = _check_and_reset_daily(db, row)
+    if not code_data["is_active"]:
+        db.close()
+        return JSONResponse(status_code=403, content={"error": "邀请码已被禁用"})
+    if code_data["expires_at"] and code_data["expires_at"] < date.today().isoformat():
+        db.close()
+        return JSONResponse(status_code=403, content={"error": "邀请码已过期"})
+    if code_data["used_today"] >= code_data["daily_limit"]:
+        db.close()
+        return JSONResponse(status_code=403, content={"error": f"今日使用次数已达上限（{code_data['daily_limit']}次/天）"})
+    # 扣次数
+    db.execute("UPDATE invite_codes SET used_today = used_today + 1, total_used = total_used + 1, last_used_date = ? WHERE code = ?",
+               (date.today().isoformat(), req.invite_code))
+    db.commit()
+    db.close()
+
     try:
         print(f"[api/run] method_text={req.method_text[:80]!r} optimize_iterations={req.optimize_iterations} ref={req.reference_image_path}")
         job_id = datetime.now().strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:8]
@@ -737,6 +846,108 @@ def _ensure_port_free(port: int) -> None:
     if not pids:
         return
     _terminate_pids(pids)
+
+
+# === Admin APIs ===
+
+class AdminLoginRequest(BaseModel):
+    password: str
+
+
+class AdminGenerateRequest(BaseModel):
+    code_type: str = "T"
+    daily_limit: int = 5
+    note: str = ""
+    count: int = 1
+    expires_at: Optional[str] = None
+
+
+class AdminRevokeRequest(BaseModel):
+    code: str
+
+
+def _require_admin(request: Request) -> None:
+    auth = request.headers.get("Authorization", "")
+    token = auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
+    if token not in ADMIN_TOKENS:
+        raise HTTPException(status_code=401, detail="未授权")
+
+
+@app.post("/api/admin/login")
+def admin_login(req: AdminLoginRequest) -> JSONResponse:
+    if req.password != ADMIN_PASSWORD:
+        return JSONResponse(status_code=403, content={"error": "密码错误"})
+    token = secrets.token_urlsafe(32)
+    ADMIN_TOKENS.add(token)
+    return JSONResponse({"token": token})
+
+
+@app.get("/api/admin/codes")
+def admin_list_codes(request: Request) -> JSONResponse:
+    _require_admin(request)
+    db = _get_db()
+    rows = db.execute("SELECT * FROM invite_codes ORDER BY created_at DESC").fetchall()
+    today = date.today().isoformat()
+    codes = []
+    for r in rows:
+        d = dict(r)
+        if d["last_used_date"] != today:
+            d["used_today"] = 0
+        codes.append(d)
+    db.close()
+    return JSONResponse(codes)
+
+
+@app.post("/api/admin/generate")
+def admin_generate(request: Request, req: AdminGenerateRequest) -> JSONResponse:
+    _require_admin(request)
+    count = max(1, min(20, req.count))
+    db = _get_db()
+    now = datetime.now().isoformat()
+    generated = []
+    for _ in range(count):
+        code = _generate_code(req.code_type)
+        db.execute(
+            "INSERT INTO invite_codes (code, code_type, daily_limit, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (code, req.code_type, req.daily_limit, req.note, now, req.expires_at),
+        )
+        generated.append(code)
+    db.commit()
+    db.close()
+    return JSONResponse({"codes": generated})
+
+
+@app.post("/api/admin/revoke")
+def admin_revoke(request: Request, req: AdminRevokeRequest) -> JSONResponse:
+    _require_admin(request)
+    db = _get_db()
+    db.execute("UPDATE invite_codes SET is_active = 0 WHERE code = ?", (req.code,))
+    db.commit()
+    db.close()
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/admin/stats")
+def admin_stats(request: Request) -> JSONResponse:
+    _require_admin(request)
+    db = _get_db()
+    total = db.execute("SELECT COUNT(*) FROM invite_codes").fetchone()[0]
+    active = db.execute("SELECT COUNT(*) FROM invite_codes WHERE is_active = 1").fetchone()[0]
+    today = date.today().isoformat()
+    used_today = db.execute("SELECT SUM(CASE WHEN last_used_date = ? THEN used_today ELSE 0 END) FROM invite_codes", (today,)).fetchone()[0] or 0
+    total_used = db.execute("SELECT SUM(total_used) FROM invite_codes").fetchone()[0] or 0
+    db.close()
+    return JSONResponse({
+        "total_codes": total,
+        "active_codes": active,
+        "used_today": used_today,
+        "total_used": total_used,
+    })
+
+
+@app.get("/admin")
+def admin_page() -> FileResponse:
+    return FileResponse(str(WEB_DIR / "admin.html"))
 
 
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="static")

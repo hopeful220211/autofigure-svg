@@ -18,8 +18,77 @@
     return text;
   }
 
+  /* ========== Invite Code Logic ========== */
+  function initInviteOverlay() {
+    const overlay = $("invite-overlay");
+    const input = $("inviteCodeInput");
+    const verifyBtn = $("inviteVerifyBtn");
+    const errorEl = $("inviteError");
+    const infoEl = $("inviteInfo");
+    if (!overlay) return;
+
+    async function verifyCode(code, silent) {
+      try {
+        const res = await fetch("/api/verify-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (!silent) errorEl.textContent = data.error || "验证失败";
+          return false;
+        }
+        if (infoEl && !silent) {
+          infoEl.textContent = `今日剩余 ${data.remaining}/${data.daily_limit} 次`;
+        }
+        return data;
+      } catch (e) {
+        if (!silent) errorEl.textContent = "网络错误，请重试";
+        return false;
+      }
+    }
+
+    // 页面加载：检查 localStorage
+    const saved = localStorage.getItem("invite_code");
+    if (saved) {
+      verifyCode(saved, true).then((result) => {
+        if (result) {
+          overlay.style.display = "none";
+        } else {
+          localStorage.removeItem("invite_code");
+          overlay.style.display = "";
+        }
+      });
+    } else {
+      overlay.style.display = "";
+    }
+
+    verifyBtn.addEventListener("click", async () => {
+      errorEl.textContent = "";
+      infoEl.textContent = "";
+      const code = input.value.trim();
+      if (!code) { errorEl.textContent = "请输入邀请码"; return; }
+      verifyBtn.disabled = true;
+      verifyBtn.textContent = "验证中...";
+      const result = await verifyCode(code, false);
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = "验证";
+      if (result) {
+        localStorage.setItem("invite_code", code);
+        overlay.style.display = "none";
+      }
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") verifyBtn.click();
+    });
+  }
+
   /* ========== Input Page ========== */
   function initInputPage() {
+    initInviteOverlay();
+
     const confirmBtn = $("confirmBtn");
     const errorMsg = $("errorMsg");
     const uploadZone = $("uploadZone");
@@ -98,6 +167,14 @@
         return;
       }
 
+      // 检查邀请码
+      const inviteCode = localStorage.getItem("invite_code");
+      if (!inviteCode) {
+        const overlay = $("invite-overlay");
+        if (overlay) overlay.style.display = "";
+        return;
+      }
+
       confirmBtn.disabled = true;
       confirmBtn.innerHTML = '<span class="btn-spinner"></span>生成中...';
       progressArea.style.display = "";
@@ -115,6 +192,7 @@
         method_text: text,
         optimize_iterations: parseInt($("optimizeIterations").value, 10),
         reference_image_path: refPath || null,
+        invite_code: inviteCode,
       };
 
       let jobId = null;
@@ -126,6 +204,14 @@
         });
         if (!response.ok) {
           const t = await response.text();
+          if (response.status === 403) {
+            // 邀请码问题，清除并弹出遮罩
+            localStorage.removeItem("invite_code");
+            const overlay = $("invite-overlay");
+            const inviteError = $("inviteError");
+            if (overlay) overlay.style.display = "";
+            if (inviteError) inviteError.textContent = parseErrorMessage(t);
+          }
           throw new Error(parseErrorMessage(t || "请求失败"));
         }
         const data = await response.json();

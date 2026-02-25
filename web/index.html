@@ -8,6 +8,18 @@
     <link rel="stylesheet" href="/styles.css?v=20260224a" />
   </head>
   <body data-page="input">
+    <!-- 邀请码遮罩层 -->
+    <div id="invite-overlay" class="invite-overlay" style="display:none">
+      <div class="invite-card">
+        <h2 class="invite-title">AutoFigure</h2>
+        <p class="invite-subtitle">请输入邀请码以使用本服务</p>
+        <input id="inviteCodeInput" class="invite-input" type="text" placeholder="请输入邀请码" autocomplete="off" />
+        <button id="inviteVerifyBtn" class="btn-primary invite-btn">验证</button>
+        <div id="inviteError" class="invite-error"></div>
+        <div id="inviteInfo" class="invite-info"></div>
+      </div>
+    </div>
+
     <nav class="navbar">
       <div class="navbar-inner">
         <div class="navbar-left">
