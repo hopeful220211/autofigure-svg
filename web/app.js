@@ -34,6 +34,17 @@
     const inviteCodeInput = $("inviteCodeInput");
     const inviteStatus = $("inviteStatus");
 
+    // 联系我们弹窗
+    const contactBtn = $("contactBtn");
+    const contactModal = $("contactModal");
+    const contactBackdrop = $("contactBackdrop");
+    const contactClose = $("contactClose");
+    if (contactBtn && contactModal) {
+      contactBtn.addEventListener("click", () => { contactModal.style.display = ""; });
+      contactBackdrop.addEventListener("click", () => { contactModal.style.display = "none"; });
+      contactClose.addEventListener("click", () => { contactModal.style.display = "none"; });
+    }
+
     // 邀请码：从 localStorage 恢复
     const savedCode = localStorage.getItem("invite_code");
     if (savedCode && inviteCodeInput) {

@@ -69,6 +69,33 @@ body {
   color: var(--text);
   text-decoration: none;
   letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.nav-contact {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: border-color 0.15s, color 0.15s;
+  cursor: pointer;
+}
+
+.nav-contact:hover {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .beta-tag {
@@ -823,4 +850,51 @@ body {
   .result-container { padding: 16px 16px 40px; }
 
   .navbar-inner { padding: 0 16px; }
+}
+
+/* === Contact Modal === */
+.contact-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.contact-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.contact-modal-body {
+  position: relative;
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 16px;
+  max-width: 400px;
+  width: 90%;
+}
+
+.contact-modal-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  border: none;
+  background: none;
+  font-size: 24px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1;
+  z-index: 1;
+}
+
+.contact-modal-close:hover { color: var(--text); }
+
+.contact-img {
+  width: 100%;
+  border-radius: var(--radius);
 }
