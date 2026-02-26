@@ -481,10 +481,12 @@ async def stream_events(job_id: str) -> StreamingResponse:
 def get_logs(job_id: str) -> PlainTextResponse:
     """返回任务的日志文件内容（纯文本）"""
     job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    if job:
+        log_path = job.log_path
+    else:
+        log_path = OUTPUTS_DIR / job_id / "run.log"
     try:
-        content = job.log_path.read_text(encoding="utf-8")
+        content = log_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         content = ""
     return PlainTextResponse(content)
@@ -493,13 +495,17 @@ def get_logs(job_id: str) -> PlainTextResponse:
 @app.get("/api/artifacts-list/{job_id}")
 def list_artifacts(job_id: str) -> JSONResponse:
     job = JOBS.get(job_id)
-    if not job:
+    if job:
+        output_dir = job.output_dir
+    else:
+        output_dir = OUTPUTS_DIR / job_id
+    if not output_dir.is_dir():
         raise HTTPException(status_code=404, detail="Job not found")
     items = []
-    for path in sorted(job.output_dir.rglob("*")):
+    for path in sorted(output_dir.rglob("*")):
         if not path.is_file():
             continue
-        rel = path.relative_to(job.output_dir).as_posix()
+        rel = path.relative_to(output_dir).as_posix()
         kind = _classify_artifact(rel)
         items.append({
             "kind": kind,
@@ -512,12 +518,17 @@ def list_artifacts(job_id: str) -> JSONResponse:
 
 @app.get("/api/artifacts/{job_id}/{path:path}")
 def get_artifact(job_id: str, path: str) -> FileResponse:
+    # 优先从内存中查找，fallback 到磁盘目录
     job = JOBS.get(job_id)
-    if not job:
+    if job:
+        output_dir = job.output_dir
+    else:
+        output_dir = OUTPUTS_DIR / job_id
+    if not output_dir.is_dir():
         raise HTTPException(status_code=404, detail="Job not found")
 
-    candidate = (job.output_dir / path).resolve()
-    if not str(candidate).startswith(str(job.output_dir.resolve())):
+    candidate = (output_dir / path).resolve()
+    if not str(candidate).startswith(str(output_dir.resolve())):
         raise HTTPException(status_code=400, detail="Invalid path")
     if not candidate.is_file():
         raise HTTPException(status_code=404, detail="File not found")
