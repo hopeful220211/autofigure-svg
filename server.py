@@ -17,7 +17,7 @@ import time
 import uuid
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -86,7 +86,14 @@ JOB_RETENTION_SECONDS = 3600  # 已完成任务保留 1 小时
 # === 邀请码系统 ===
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", "."), "invites.db")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "ccccckd011122")
-ADMIN_TOKENS: set[str] = set()
+ADMIN_TOKENS: dict[str, float] = {}
+
+
+def _beijing_today() -> date:
+    return datetime.now(timezone(timedelta(hours=8))).date()
+
+
+_LOGIN_FAILURES: dict[str, list] = {}
 
 
 def init_db() -> None:
@@ -111,6 +118,7 @@ def init_db() -> None:
 
 def _get_db() -> sqlite3.Connection:
     db = sqlite3.connect(DB_PATH)
+    db.execute("PRAGMA journal_mode=WAL")
     db.row_factory = sqlite3.Row
     return db
 
@@ -124,7 +132,7 @@ def _generate_code(code_type: str = "T") -> str:
 
 def _check_and_reset_daily(db: sqlite3.Connection, code_row: sqlite3.Row) -> dict:
     """检查并重置每日使用次数，返回更新后的字典"""
-    today = date.today().isoformat()
+    today = _beijing_today().isoformat()
     data = dict(code_row)
     if data["last_used_date"] != today:
         db.execute("UPDATE invite_codes SET used_today = 0, last_used_date = ? WHERE code = ?",
@@ -136,6 +144,11 @@ def _check_and_reset_daily(db: sqlite3.Connection, code_row: sqlite3.Row) -> dic
 
 
 init_db()
+
+if ADMIN_PASSWORD == "ccccckd011122":
+    print("[WARNING] 使用默认管理员密码，请设置 ADMIN_PASSWORD 环境变量")
+if not API_KEY:
+    print("[WARNING] 未设置 API_KEY 环境变量，生成功能将不可用")
 
 
 @dataclass
@@ -180,7 +193,7 @@ class Job:
 
 
 class RunRequest(BaseModel):
-    method_text: str = Field(..., min_length=1)
+    method_text: str = Field(..., min_length=1, max_length=50000)
     optimize_iterations: Optional[int] = None
     reference_image_path: Optional[str] = None
     invite_code: Optional[str] = None
@@ -218,7 +231,7 @@ async def internal_error_handler(request: Request, exc: Exception):
 
 
 class VerifyCodeRequest(BaseModel):
-    code: str
+    code: str = Field(..., max_length=20)
 
 
 @app.post("/api/verify-code")
@@ -232,7 +245,7 @@ def verify_code(req: VerifyCodeRequest) -> JSONResponse:
     db.close()
     if not data["is_active"]:
         return JSONResponse(status_code=403, content={"error": "邀请码已被禁用"})
-    if data["expires_at"] and data["expires_at"] < date.today().isoformat():
+    if data["expires_at"] and data["expires_at"] < _beijing_today().isoformat():
         return JSONResponse(status_code=403, content={"error": "邀请码已过期"})
     remaining = data["daily_limit"] - data["used_today"]
     return JSONResponse({
@@ -249,6 +262,8 @@ def run_job(req: RunRequest) -> JSONResponse:
     # 邀请码验证 + 扣次数
     if not req.invite_code:
         return JSONResponse(status_code=403, content={"error": "请输入邀请码后再生成"})
+    if len(req.invite_code) > 20:
+        return JSONResponse(status_code=403, content={"error": "邀请码格式无效"})
     db = _get_db()
     row = db.execute("SELECT * FROM invite_codes WHERE code = ?", (req.invite_code,)).fetchone()
     if not row:
@@ -258,7 +273,7 @@ def run_job(req: RunRequest) -> JSONResponse:
     if not code_data["is_active"]:
         db.close()
         return JSONResponse(status_code=403, content={"error": "邀请码已被禁用"})
-    if code_data["expires_at"] and code_data["expires_at"] < date.today().isoformat():
+    if code_data["expires_at"] and code_data["expires_at"] < _beijing_today().isoformat():
         db.close()
         return JSONResponse(status_code=403, content={"error": "邀请码已过期"})
     if code_data["used_today"] >= code_data["daily_limit"]:
@@ -266,7 +281,7 @@ def run_job(req: RunRequest) -> JSONResponse:
         return JSONResponse(status_code=403, content={"error": f"今日使用次数已达上限（{code_data['daily_limit']}次/天）"})
     # 扣次数
     db.execute("UPDATE invite_codes SET used_today = used_today + 1, total_used = total_used + 1, last_used_date = ? WHERE code = ?",
-               (date.today().isoformat(), req.invite_code))
+               (_beijing_today().isoformat(), req.invite_code))
     db.commit()
     db.close()
 
@@ -882,14 +897,24 @@ def _require_admin(request: Request) -> None:
     token = auth.replace("Bearer ", "") if auth.startswith("Bearer ") else ""
     if token not in ADMIN_TOKENS:
         raise HTTPException(status_code=401, detail="未授权")
+    if time.time() - ADMIN_TOKENS[token] >= 86400:
+        ADMIN_TOKENS.pop(token, None)
+        raise HTTPException(status_code=401, detail="未授权")
 
 
 @app.post("/api/admin/login")
-def admin_login(req: AdminLoginRequest) -> JSONResponse:
+async def admin_login(req: AdminLoginRequest, request: Request) -> JSONResponse:
+    ip = request.client.host if request.client else "unknown"
     if req.password != ADMIN_PASSWORD:
+        _LOGIN_FAILURES.setdefault(ip, []).append(time.time())
+        if len(_LOGIN_FAILURES.get(ip, [])) >= 5:
+            await asyncio.sleep(5)
+        else:
+            await asyncio.sleep(1)
         return JSONResponse(status_code=403, content={"error": "密码错误"})
+    _LOGIN_FAILURES.pop(ip, None)
     token = secrets.token_urlsafe(32)
-    ADMIN_TOKENS.add(token)
+    ADMIN_TOKENS[token] = time.time()
     return JSONResponse({"token": token})
 
 
@@ -898,7 +923,7 @@ def admin_list_codes(request: Request) -> JSONResponse:
     _require_admin(request)
     db = _get_db()
     rows = db.execute("SELECT * FROM invite_codes ORDER BY created_at DESC").fetchall()
-    today = date.today().isoformat()
+    today = _beijing_today().isoformat()
     codes = []
     for r in rows:
         d = dict(r)
@@ -944,7 +969,7 @@ def admin_stats(request: Request) -> JSONResponse:
     db = _get_db()
     total = db.execute("SELECT COUNT(*) FROM invite_codes").fetchone()[0]
     active = db.execute("SELECT COUNT(*) FROM invite_codes WHERE is_active = 1").fetchone()[0]
-    today = date.today().isoformat()
+    today = _beijing_today().isoformat()
     used_today = db.execute("SELECT SUM(CASE WHEN last_used_date = ? THEN used_today ELSE 0 END) FROM invite_codes", (today,)).fetchone()[0] or 0
     total_used = db.execute("SELECT SUM(total_used) FROM invite_codes").fetchone()[0] or 0
     db.close()

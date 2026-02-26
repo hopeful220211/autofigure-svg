@@ -1,4 +1,21 @@
 (() => {
+  function safeGetItem(key) { try { return localStorage.getItem(key); } catch(e) { return null; } }
+  function safeSetItem(key, val) { try { localStorage.setItem(key, val); } catch(e) {} }
+  function safeRemoveItem(key) { try { localStorage.removeItem(key); } catch(e) {} }
+
+  function fetchWithTimeout(url, opts, ms) {
+    ms = ms || 30000;
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, ms);
+    opts = opts || {};
+    opts.signal = controller.signal;
+    return fetch(url, opts).then(function(res) { clearTimeout(timer); return res; }).catch(function(err) {
+      clearTimeout(timer);
+      if (err.name === 'AbortError') throw new Error('服务器连接超时，请刷新页面重试');
+      throw err;
+    });
+  }
+
   const page = document.body.dataset.page;
   if (page === "input") initInputPage();
   else if (page === "canvas") initCanvasPage();
@@ -16,6 +33,13 @@
     } catch (_) {}
     if (text.length > 200) return "请求失败，请检查输入或稍后重试。";
     return text;
+  }
+
+  function handleFetchError(response, text) {
+    if (response.status === 429) return "请求过于频繁，请稍后再试";
+    if (response.status === 500) return "服务器内部错误，请稍后重试";
+    if (response.status === 403) return parseErrorMessage(text);
+    return parseErrorMessage(text || "请求失败");
   }
 
   /* ========== Input Page ========== */
@@ -46,7 +70,7 @@
     }
 
     // 邀请码：从 localStorage 恢复
-    const savedCode = localStorage.getItem("invite_code");
+    const savedCode = safeGetItem("invite_code");
     if (savedCode && inviteCodeInput) {
       inviteCodeInput.value = savedCode;
       inviteStatus.textContent = "已保存的邀请码";
@@ -149,7 +173,7 @@
 
       let jobId = null;
       try {
-        const response = await fetch("/api/run", {
+        const response = await fetchWithTimeout("/api/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -158,16 +182,16 @@
           const t = await response.text();
           if (response.status === 403) {
             // 邀请码问题，清除缓存
-            localStorage.removeItem("invite_code");
-            if (inviteStatus) { inviteStatus.textContent = parseErrorMessage(t); inviteStatus.style.color = "#dc3545"; }
+            safeRemoveItem("invite_code");
+            if (inviteStatus) { inviteStatus.textContent = handleFetchError(response, t); inviteStatus.style.color = "#dc3545"; }
             if (inviteCodeInput) inviteCodeInput.focus();
           }
-          throw new Error(parseErrorMessage(t || "请求失败"));
+          throw new Error(handleFetchError(response, t));
         }
         const data = await response.json();
         jobId = data.job_id;
         // 成功后保存邀请码到 localStorage
-        localStorage.setItem("invite_code", inviteCode);
+        safeSetItem("invite_code", inviteCode);
         if (inviteStatus) { inviteStatus.textContent = "邀请码有效"; inviteStatus.style.color = "#10b981"; }
       } catch (err) {
         errorMsg.textContent = err.message || "启动任务失败";
@@ -227,7 +251,7 @@
           retryCount++;
           if (retryCount <= MAX_RETRIES) {
             progressLabel.textContent = "连接中断，正在重连...";
-            setTimeout(connectSSE, 3000);
+            setTimeout(connectSSE, Math.min(3000 * Math.pow(2, retryCount - 1), 30000));
           } else {
             // 重连多次失败，跳转到结果页查看
             window.location.href = `/canvas.html?job=${encodeURIComponent(jobId)}`;
@@ -250,7 +274,7 @@
       formData.append("file", file);
 
       try {
-        const response = await fetch("/api/upload", { method: "POST", body: formData });
+        const response = await fetchWithTimeout("/api/upload", { method: "POST", body: formData });
         if (!response.ok) {
           const text = await response.text();
           throw new Error(parseErrorMessage(text || "上传失败"));
@@ -315,7 +339,7 @@
     cancelBtn.addEventListener("click", async () => {
       if (!confirm("确定要取消当前任务吗？")) return;
       try {
-        await fetch(`/api/cancel/${jobId}`, { method: "POST" });
+        await fetchWithTimeout(`/api/cancel/${jobId}`, { method: "POST" });
         statusText.textContent = "已取消";
         cancelBtn.style.display = "none";
       } catch (_) {}
@@ -432,9 +456,9 @@
         sseRetryCount++;
         if (sseRetryCount <= SSE_MAX_RETRIES) {
           statusText.textContent = "连接中断，正在重连...";
-          setTimeout(connectSSE, 3000);
+          setTimeout(connectSSE, Math.min(3000 * Math.pow(2, sseRetryCount - 1), 30000));
         } else {
-          statusText.textContent = "连接已断开";
+          statusText.textContent = "连接已断开，请刷新页面查看结果";
           cancelBtn.style.display = "none";
           stopLogPolling();
           fetchLogs();
@@ -501,7 +525,7 @@
     let logPollTimer = null;
     async function fetchLogs() {
       try {
-        const res = await fetch(`/api/logs/${jobId}`);
+        const res = await fetchWithTimeout(`/api/logs/${jobId}`);
         if (!res.ok) return;
         const text = await res.text();
         if (text) {
@@ -531,7 +555,7 @@
 
     async function fetchArtifactList() {
       try {
-        const res = await fetch(`/api/artifacts-list/${jobId}`);
+        const res = await fetchWithTimeout(`/api/artifacts-list/${jobId}`);
         if (!res.ok) return;
         const items = await res.json();
 

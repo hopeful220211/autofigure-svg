@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Einstein - 科研插图生成</title>
     <link rel="icon" href="/logo.jpg" type="image/jpeg" />
-    <link rel="stylesheet" href="/styles.css?v=20260225c" />
+    <link rel="stylesheet" href="/styles.css?v=20260226a" />
   </head>
   <body data-page="input">
     <nav class="navbar">
@@ -35,6 +35,7 @@
               id="methodText"
               class="textarea"
               rows="10"
+              maxlength="50000"
               placeholder="在此粘贴论文的 Methods 部分文本...&#10;&#10;支持中英文输入，中文将自动翻译为英文以获得最佳效果。"
             ></textarea>
             <div class="chinese-hint" id="chineseHint" style="display:none">
@@ -69,7 +70,7 @@
 
             <div class="field-group" id="inviteCodeGroup">
               <label class="field-label" for="inviteCodeInput">邀请码（必填）</label>
-              <input id="inviteCodeInput" class="input-field" type="text" placeholder="请输入邀请码" autocomplete="off" />
+              <input id="inviteCodeInput" class="input-field" type="text" placeholder="请输入邀请码" autocomplete="off" maxlength="20" />
               <div class="field-hint" id="inviteStatus"></div>
             </div>
           </div>
@@ -106,6 +107,6 @@
       </div>
     </div>
 
-    <script src="/app.js?v=20260225c"></script>
+    <script src="/app.js?v=20260226a"></script>
   </body>
 </html>
